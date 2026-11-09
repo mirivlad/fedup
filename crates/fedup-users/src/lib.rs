@@ -301,12 +301,24 @@ pub fn register_signed_device(
             "SELECT csr_sha256,certificate_pem,fingerprint,revision,expires_at,disabled
              FROM devices WHERE username=?1 AND label=?2",
             params![username, label],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
         )
         .optional()?;
     if let Some((saved_csr, saved_cert, saved_fp, rev, expiry, disabled)) = existing {
-        if !disabled && rev == revision && expiry > unix_seconds()? &&
-            saved_csr.as_deref() == Some(csr_sha256) {
+        if !disabled
+            && rev == revision
+            && expiry > unix_seconds()?
+            && saved_csr.as_deref() == Some(csr_sha256)
+        {
             let cert = saved_cert.ok_or("missing stored certificate for idempotent retry")?;
             tx.commit()?;
             return Ok((cert, saved_fp));
@@ -315,7 +327,7 @@ pub fn register_signed_device(
     }
     let active_count: i64 = tx.query_row(
         "SELECT COUNT(*) FROM devices WHERE username=?1 AND revision=?2 AND disabled=0",
-        params![username,revision],
+        params![username, revision],
         |row| row.get(0),
     )?;
     if active_count >= 8 {
@@ -549,15 +561,33 @@ mod tests {
         assert!(!authorized_device(&dir, &fp).unwrap());
         disable(&dir, "family", false).unwrap();
         assert!(!authorized_device(&dir, &fp).unwrap());
-        assert!(register_device(&dir, "family", revision, "second", &"b2".repeat(32), unix_seconds().unwrap()+600).is_err());
+        assert!(register_device(
+            &dir,
+            "family",
+            revision,
+            "second",
+            &"b2".repeat(32),
+            unix_seconds().unwrap() + 600
+        )
+        .is_err());
         change_password(&dir, "family", b"new-very-long-password").unwrap();
         assert!(!authorized_device(&dir, &fp).unwrap());
-        let new_rev=authenticate_revision(&dir,"family",b"new-very-long-password").unwrap().unwrap();
-        let fp2="b2".repeat(32);
-        register_device(&dir,"family",new_rev,"phone-new",&fp2,unix_seconds().unwrap()+600).unwrap();
-        assert!(authorized_device(&dir,&fp2).unwrap());
-        revoke_device(&dir,&fp2).unwrap();
-        assert!(!authorized_device(&dir,&fp2).unwrap());
+        let new_rev = authenticate_revision(&dir, "family", b"new-very-long-password")
+            .unwrap()
+            .unwrap();
+        let fp2 = "b2".repeat(32);
+        register_device(
+            &dir,
+            "family",
+            new_rev,
+            "phone-new",
+            &fp2,
+            unix_seconds().unwrap() + 600,
+        )
+        .unwrap();
+        assert!(authorized_device(&dir, &fp2).unwrap());
+        revoke_device(&dir, &fp2).unwrap();
+        assert!(!authorized_device(&dir, &fp2).unwrap());
         fs::remove_dir_all(dir).unwrap();
     }
 
