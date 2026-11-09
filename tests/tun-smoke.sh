@@ -13,6 +13,11 @@ ENROLL="$PWD/target/debug/fedup-enroll"
 DEVICE="$PWD/target/debug/fedup-device"
 ADMIN="$PWD/target/debug/fedup-admin"
 MODE="${FEDUP_TUN_TRANSPORT:-raw}"
+FAULT_MODE="${FEDUP_TUN_FAULT:-0}"
+[[ "$FAULT_MODE" == 0 || "$FAULT_MODE" == 1 ]] || { echo "FEDUP_TUN_FAULT must be 0 or 1" >&2; exit 2; }
+if [[ "$FAULT_MODE" == 1 ]]; then
+  for required in tc nft; do command -v "$required" >/dev/null || { echo "Missing $required for fault tests" >&2; exit 2; }; done
+fi
 case "$MODE" in
   raw) SERVER_CMD="server"; CLIENT_CMD="client" ;;
   h2) SERVER_CMD="server-h2"; CLIENT_CMD="client-h2" ;;
@@ -20,7 +25,7 @@ case "$MODE" in
 esac
 umask 077
 TMP="$(mktemp -d)"
-CN="fuc$"; SN="fus$"; EN="fue$"; CV="vfc$"; SV="vfs$"; SE="vse$"; EV="vee$"
+CN="fuc$"; SN="fus$"; EN="fue$"; CV="vfc$"; SV="vfs$"; SE="vse$"; EV="vee$"; BW="vbw$"; BE="vbe$"
 PIDS=""
 cleanup() {
   set +e
@@ -80,6 +85,43 @@ ip -n "$EN" -6 route add fd42:fed0::2/128 via fd42:fed1::1 dev "$EV"
 ip netns exec "$SN" sysctl -qw net.ipv4.ip_forward=1
 ip netns exec "$SN" sysctl -qw net.ipv6.conf.all.forwarding=1
 
+# A deliberately reachable DIRECT path represents a dangerous fallback.
+# It exists only in the disposable network namespaces, never on the host.
+if [[ "$FAULT_MODE" == 1 ]]; then
+  ip link add "$BW" type veth peer name "$BE"
+  ip link set "$BW" netns "$CN"
+  ip link set "$BE" netns "$EN"
+  ip -n "$CN" addr add 172.31.55.2/30 dev "$BW"
+  ip -n "$EN" addr add 172.31.55.1/30 dev "$BE"
+  ip -n "$CN" -6 addr add fd42:fed2::2/64 dev "$BW"
+  ip -n "$EN" -6 addr add fd42:fed2::1/64 dev "$BE"
+  ip -n "$CN" link set "$BW" up
+  ip -n "$EN" link set "$BE" up
+  ip -n "$CN" route add 10.88.0.10/32 via 172.31.55.1 dev "$BW" metric 100
+  ip -n "$CN" -6 route add fd42:fed1::10/128 via fd42:fed2::1 dev "$BW" metric 4096
+  # Prove the bypass is real BEFORE installing a deny policy.
+  timeout 8 ip netns exec "$CN" ping -n -c 1 -W 2 10.88.0.10 >/dev/null
+  timeout 8 ip netns exec "$CN" ping -6 -n -c 1 -W 2 fd42:fed1::10 >/dev/null
+  echo "Synthetic direct bypass is reachable WITHOUT kill switch: confirmed"
+  # nftables applies only to the isolated CLIENT namespace.
+  ip netns exec "$CN" nft -f - <<'NFT'
+table inet fedup_lab {
+  chain output {
+    type filter hook output priority -50; policy accept;
+    ip daddr 10.88.0.10 oifname != "futclient" counter drop
+    ip6 daddr fd42:fed1::10 oifname != "futclient" counter drop
+  }
+}
+NFT
+  if timeout 4 ip netns exec "$CN" ping -n -c 1 -W 1 10.88.0.10 >/dev/null 2>&1; then
+    echo "FAIL: protected IPv4 leaked to direct bypass" >&2; exit 1
+  fi
+  if timeout 4 ip netns exec "$CN" ping -6 -n -c 1 -W 1 fd42:fed1::10 >/dev/null 2>&1; then
+    echo "FAIL: protected IPv6 leaked to direct bypass" >&2; exit 1
+  fi
+  echo "Per-destination nftables kill switch blocks both direct bypasses: PASS"
+fi
+
 # Optional passive TLS capture: only artificial addresses inside this namespace.
 # Set FEDUP_CAPTURE_PCAP to an output path (never capture personal browsing).
 CAPTURE="$(printenv FEDUP_CAPTURE_PCAP 2>/dev/null || true)"
@@ -125,7 +167,8 @@ ip -n "$SN" -6 addr add fd42:fed0::1/64 dev futserver
 printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" "$CLIENT_CMD" \
   172.31.44.1:7443 futclient "$TMP/identity" --passphrase-stdin \
   >"$TMP/client.log" 2>&1 &
-PIDS="$PIDS $!"
+CLIENT_PID="$!"
+PIDS="$PIDS $CLIENT_PID"
 for i in $(seq 1 80); do
   ip -n "$CN" link show futclient >/dev/null 2>&1 && break
   sleep 0.1
@@ -264,6 +307,50 @@ if timeout 3 ip netns exec "$CN" ping -n -c 1 -W 1 10.88.0.11 >/dev/null 2>&1; t
   echo "FAIL: unapproved egress address reachable" >&2; exit 1
 fi
 
+if [[ "$FAULT_MODE" == 1 ]]; then
+  # TCP-in-TCP under controlled delay/loss. No promises about throughput:
+  # record the observed elapsed time for an identical synthetic binary echo.
+  ip netns exec "$CN" tc qdisc add dev "$CV" root netem delay 20ms 5ms loss 1% seed 24817
+  ip netns exec "$SN" tc qdisc add dev "$SV" root netem delay 20ms 5ms loss 1% seed 90241
+  ip netns exec "$EN" python3 -u - <<'PY' >"$TMP/bulk-echo.log" 2>&1 &
+import socket, threading
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("10.88.0.10", 8899))
+s.listen(8)
+def work(connection):
+    with connection:
+        while True:
+            packet = connection.recv(32768)
+            if not packet: break
+            connection.sendall(packet)
+while True:
+    connection, _ = s.accept()
+    threading.Thread(target=work, args=(connection,), daemon=True).start()
+PY
+  PIDS="$PIDS $!"
+  sleep 0.2
+  ip netns exec "$CN" env FEDUP_MEASURE_MODE="$MODE" python3 - <<'PY'
+import json, os, socket, time
+body = bytes(range(256)) * 768  # 196608 bytes; many TUN packets
+started = time.monotonic()
+with socket.create_connection(("10.88.0.10", 8899), timeout=30) as sock:
+    sock.settimeout(45)
+    sock.sendall(body)
+    sock.shutdown(socket.SHUT_WR)
+    chunks = bytearray()
+    while len(chunks) < len(body):
+        part = sock.recv(65536)
+        if not part: break
+        chunks.extend(part)
+assert chunks == body, f"binary echo mismatch {len(chunks)} != {len(body)}"
+print(json.dumps({"mode": os.environ["FEDUP_MEASURE_MODE"], "scenario": "netem-delay20ms-loss1percent", "roundtrip_bytes": len(body), "duration_seconds": round(time.monotonic()-started,3)}))
+PY
+  # Disable impairment before subsequent revocation assertions.
+  ip netns exec "$CN" tc qdisc del dev "$CV" root
+  ip netns exec "$SN" tc qdisc del dev "$SV" root
+  echo "Netem 1% loss, bidirectional 20ms delay, 192KiB TCP over tunneled IP: PASS"
+fi
 "$ADMIN" revoke "$TMP/allowed.txt" lab-device
 sleep 6
 if timeout 4 ip netns exec "$CN" ping -n -c 1 -W 1 10.77.0.1 >/dev/null 2>&1; then
@@ -276,4 +363,34 @@ if timeout 4 ip netns exec "$CN" ping -n -c 1 -W 1 10.88.0.10 >/dev/null 2>&1; t
   echo "FAIL: revoked client still reaches synthetic egress" >&2; exit 1
 fi
 echo "Revocation, routed-egress cut-off and no external-route fallback: PASS"
+if [[ "$FAULT_MODE" == 1 ]]; then
+  # Abrupt client process loss must not select the working direct bypass.
+  kill -9 "$CLIENT_PID" 2>/dev/null || true
+  wait "$CLIENT_PID" 2>/dev/null || true
+  for i in $(seq 1 50); do
+    if ! ip -n "$CN" link show futclient >/dev/null 2>&1; then break; fi
+    sleep 0.1
+  done
+  if ip -n "$CN" link show futclient >/dev/null 2>&1; then
+    echo "FAIL: TUN remained after client process termination" >&2; exit 1
+  fi
+  # The kernel now tries a REAL alternative route. nftables must block it.
+  ip -n "$CN" route get 10.88.0.10 | grep -q "dev $BW" || {
+    echo "FAIL: alternate IPv4 route did not become active" >&2; exit 1;
+  }
+  ip -n "$CN" -6 route get fd42:fed1::10 | grep -q "dev $BW" || {
+    echo "FAIL: alternate IPv6 route did not become active" >&2; exit 1;
+  }
+  if timeout 4 ip netns exec "$CN" ping -n -c 1 -W 1 10.88.0.10 >/dev/null 2>&1; then
+    echo "FAIL: protected IPv4 leaked when TUN crashed" >&2; exit 1
+  fi
+  if timeout 4 ip netns exec "$CN" ping -6 -n -c 1 -W 1 fd42:fed1::10 >/dev/null 2>&1; then
+    echo "FAIL: protected IPv6 leaked when TUN crashed" >&2; exit 1
+  fi
+  ip netns exec "$CN" nft list chain inet fedup_lab output >"$TMP/nft-counters.txt"
+  grep -q "counter packets" "$TMP/nft-counters.txt" || {
+    echo "FAIL: nftables output counters unavailable" >&2; exit 1;
+  }
+  echo "Crash with available direct bypass: nftables blocks IPv4 and IPv6 leaks: PASS"
+fi
 echo "FedUp Linux TUN namespace lab ($MODE): PASS"
