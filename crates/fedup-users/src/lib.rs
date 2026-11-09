@@ -745,3 +745,4 @@ mod tests {
         .is_err());
         fs::remove_dir_all(dir).unwrap();
     }
+}
