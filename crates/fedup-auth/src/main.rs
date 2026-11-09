@@ -5,7 +5,7 @@
 //! Reverse proxy MUST authenticate its own TLS certificate and disable caching.
 
 use axum::extract::{DefaultBodyLimit, Json, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::post;
 use axum::Router;
@@ -29,7 +29,6 @@ struct Login {
     password: String,
 }
 
-#[derive(Default)]
 struct Limits {
     global: (Instant, u32),
     users: HashMap<String, (Instant, u32)>,
@@ -66,7 +65,7 @@ impl Limits {
 struct App {
     users: PathBuf,
     attempts: Mutex<Limits>,
-    workers: Semaphore,
+    workers: Arc<Semaphore>,
 }
 
 impl App {
@@ -77,7 +76,7 @@ impl App {
                 global: (Instant::now(), 0),
                 users: HashMap::new(),
             }),
-            workers: Semaphore::new(4),
+            workers: Arc::new(Semaphore::new(4)),
         }
     }
 }
