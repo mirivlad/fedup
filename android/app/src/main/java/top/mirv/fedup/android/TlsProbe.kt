@@ -105,8 +105,9 @@ internal object TlsProbe {
         val alias = identity.privateKeyAlias()
         val key = store.getKey(alias, null) as? PrivateKey
             ?: error("Non-exportable AndroidKeystore private key was lost")
+        val localCert = store.getCertificate(alias) ?: error("Android device key is missing")
         require(java.security.MessageDigest.isEqual(
-            store.getCertificate(alias)?.publicKey?.encoded,
+            localCert.publicKey.encoded,
             clientCert.publicKey.encoded
         )) { "Client certificate does not match device key" }
 
@@ -138,7 +139,7 @@ internal object TlsProbe {
             .dns(dns)
             .proxy(Proxy.NO_PROXY)
             .sslSocketFactory(tls.socketFactory, verifier)
-            .protocols(listOf(Protocol.HTTP_2))
+            .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
             .connectionSpecs(
                 listOf(ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
                     .tlsVersions(TlsVersion.TLS_1_3).build())
