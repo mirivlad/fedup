@@ -91,6 +91,13 @@ enum Direction {
     ServerToClient,
 }
 
+fn private_lab_ip(addr: SocketAddr) -> bool {
+    match addr.ip() {
+        IpAddr::V4(ip) => ip.is_private() || ip.is_loopback(),
+        IpAddr::V6(_) => false,
+    }
+}
+
 fn addresses(dir: Direction) -> (IpAddr, IpAddr) {
     match dir {
         Direction::ClientToServer => (
@@ -315,7 +322,7 @@ async fn server(
     key: &Path,
     allowlist: &Path,
 ) -> Result<()> {
-    if !listen.ip().is_loopback() && !listen.ip().is_private() {
+    if !private_lab_ip(listen) {
         return Err("lab server must bind loopback or private IPv4 address".into());
     }
     if listen.is_ipv6() {
@@ -345,7 +352,7 @@ async fn client(
     directory: &Path,
     password_stdin: bool,
 ) -> Result<()> {
-    if !server.is_ipv4() || !(server.ip().is_loopback() || server.ip().is_private()) {
+    if !private_lab_ip(server) {
         return Err("lab client accepts only private IPv4 or loopback server address".into());
     }
     let device = device_connection(directory)?;
