@@ -52,8 +52,20 @@ jobs:
       - name: Install Linux namespace test tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq iproute2 iputils-ping libssl-dev pkg-config curl
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iproute2 iputils-ping libssl-dev pkg-config curl tcpdump tshark
       - name: Build experimental TUN, enrollment and administration
         run: cargo build -p fedup-tun -p fedup-identity -p fedup-enroll -p fedup-admin
-      - name: Verify isolated network namespaces and revocation
-        run: sudo bash tests/tun-smoke.sh
+      - name: Verify isolated namespaces and measure TLS traffic shape
+        run: |
+          mkdir -p "$RUNNER_TEMP/fedup-profile"
+          sudo env FEDUP_CAPTURE_PCAP="$RUNNER_TEMP/fedup-profile/tun.pcap" bash tests/tun-smoke.sh
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/fedup-profile/tun.pcap"
+          python3 tools/traffic-profile.py "$RUNNER_TEMP/fedup-profile/tun.pcap" --output "$RUNNER_TEMP/fedup-profile/report.json"
+          cat "$RUNNER_TEMP/fedup-profile/report.json"
+          python3 - "$RUNNER_TEMP/fedup-profile/report.json" <<'PY'
+          import json,sys
+          result=json.load(open(sys.argv[1]))
+          assert result["fedup"]["client_hello_count"] > 0, "no FedUp ClientHello"
+          assert result["https_reference"]["client_hello_count"] > 0, "no baseline HTTPS ClientHello"
+          print("TLS fingerprint extraction from synthetic FedUp and HTTPS captures: PASS")
+          PY
