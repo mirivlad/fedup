@@ -168,24 +168,13 @@ fi
 CAPTURE="$(printenv FEDUP_CAPTURE_PCAP 2>/dev/null || true)"
 if [[ -n "$CAPTURE" ]]; then
   command -v tcpdump >/dev/null || { echo "tcpdump required for capture" >&2; exit 2; }
-  ip netns exec "$SN" tcpdump -i "$SV" -n -s 0 -U -w "$CAPTURE" \
-    '(tcp port 7443 or tcp port 9443)' >"$TMP/tcpdump.log" 2>&1 &
-  PIDS="$PIDS $!"
-  sleep 0.5
-  # Control sample: genuine TLS 1.3 with an HTTP/1.1 application, not a
-  # browser fingerprint or HTTP/2 baseline.
+  # Launch reference server now, but do not begin capture until AFTER
+  # h2 authorization probes, which deliberately establish extra TLS sessions.
+  # The controlled traffic study must contain exactly ONE FedUp ClientHello.
   ip netns exec "$SN" openssl s_server -accept 172.31.44.1:9443 \
     -cert "$TMP/server.pem" -key "$TMP/server.key" -tls1_3 -www \
     >"$TMP/https.log" 2>&1 &
   PIDS="$PIDS $!"
-  for i in $(seq 1 30); do
-    if ip netns exec "$CN" curl -k -fsS --noproxy '*' --http1.1 \
-      --connect-timeout 1 -m 3 --resolve localhost:9443:172.31.44.1 \
-      https://localhost:9443/ >/dev/null 2>&1; then
-      break
-    fi
-    sleep 0.2
-  done
 fi
 if ip -n "$CN" route get 1.1.1.1 >/dev/null 2>&1; then
   echo "FAIL: test namespace has external route" >&2; exit 1
@@ -220,6 +209,23 @@ if [[ "$MODE" == h2 ]]; then
     exit 1
   fi
   echo "HTTP/2 probe: approved device PASS, unknown device DENIED; no TUN created"
+fi
+
+# Start a clean measurement AFTER deliberate extra probe connections. Also
+# capture the HTTP/1.1 control ClientHello in the SAME final PCAP.
+if [[ -n "$CAPTURE" ]]; then
+  ip netns exec "$SN" tcpdump -i "$SV" -n -s 0 -U -w "$CAPTURE" \
+    '(tcp port 7443 or tcp port 9443)' >"$TMP/tcpdump.log" 2>&1 &
+  PIDS="$PIDS $!"
+  sleep 0.3
+  for i in $(seq 1 30); do
+    if ip netns exec "$CN" curl -k -fsS --noproxy '*' --http1.1 \
+      --connect-timeout 1 -m 3 --resolve localhost:9443:172.31.44.1 \
+      https://localhost:9443/ >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.2
+  done
 fi
 
 printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" "$CLIENT_CMD" \
