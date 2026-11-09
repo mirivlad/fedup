@@ -1,0 +1,13 @@
+[package]
+name = "fedup-users"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Experimental SSH-first FedUp user accounts with Argon2id password verification"
+
+[dependencies]
+argon2 = { version = "0.5.3", features = ["std"] }
+rand = "0.8"
+rusqlite = { version = "0.37", features = ["bundled"] }
+zeroize = "1.8"
