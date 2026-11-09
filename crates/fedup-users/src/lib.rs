@@ -104,7 +104,17 @@ fn init(dir: &Path) -> Result<()> {
             password_phc TEXT NOT NULL,
             disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0,1)),
             revision INTEGER NOT NULL DEFAULT 1
-        );",
+        );
+        CREATE TABLE devices (
+            fingerprint TEXT PRIMARY KEY NOT NULL,
+            username TEXT NOT NULL REFERENCES users(username),
+            label TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0,1)),
+            UNIQUE(username, label)
+        );
+        CREATE INDEX devices_by_owner ON devices(username);",
     )?;
     Ok(())
 }
@@ -159,28 +169,129 @@ fn disable(dir: &Path, username: &str, disabled: bool) -> Result<()> {
     Ok(())
 }
 
+/// Return the exact revision authenticated by the password. An issuer MUST
+/// compare this revision inside its registration transaction to prevent a
+/// concurrent password reset from registering a new device.
+pub fn authenticate_revision(
+    dir: &Path,
+    username: &str,
+    password: &[u8],
+) -> Result<Option<i64>> {
+    if !valid_username(username) || password.len() > PASSWORD_MAX || password.is_empty() {
+        return Ok(None);
+    }
+    let db = connection(dir)?;
+    let record: Option<(String, bool, i64)> = db
+        .query_row(
+            "SELECT password_phc,disabled,revision FROM users WHERE username=?1",
+            [username],
+            |row| Ok((row.get(0)?, row.get::<_, i64>(1)? != 0, row.get(2)?)),
+        )
+        .optional()?;
+    let dummy = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXJhbmRvbXNhbHQxMjM0NTY$+w/0X+MZSTWzPmM9EFhYQexbawefxG4TOGsvrPD/GHA";
+    let (phc, disabled, revision, found) = match record {
+        Some((hash, blocked, revision)) => (hash, blocked, revision, true),
+        None => (dummy.to_owned(), true, 0, false),
+    };
+    let valid = verify_password(&phc, password);
+    if found && !disabled && valid {
+        Ok(Some(revision))
+    } else {
+        Ok(None)
+    }
+}
+
 pub fn authenticate(dir: &Path, username: &str, password: &[u8]) -> Result<bool> {
-    if !valid_username(username) || password.len() > PASSWORD_MAX {
+    Ok(authenticate_revision(dir, username, password)?.is_some())
+}
+
+/// Link a signed cert fingerprint to a user only when their *same*
+/// authenticated account revision is still active. Revoking or changing
+/// the user's password invalidates all devices immediately on next check.
+pub fn register_device(
+    dir: &Path,
+    username: &str,
+    revision: i64,
+    label: &str,
+    fingerprint: &str,
+    expires_at: i64,
+) -> Result<()> {
+    if !valid_username(username)
+        || !valid_username(label)
+        || fingerprint.len() != 64
+        || !fingerprint.bytes().all(|b| b.is_ascii_hexdigit())
+        || expires_at <= unix_seconds()?
+    {
+        return Err("invalid device metadata".into());
+    }
+    let mut db = connection(dir)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let active: bool = tx
+        .query_row(
+            "SELECT disabled=0 AND revision=?2 FROM users WHERE username=?1",
+            params![username, revision],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if !active {
+        return Err("account disabled or changed during enrollment".into());
+    }
+    let count: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM devices WHERE username=?1 AND disabled=0 AND revision=?2",
+        params![username, revision],
+        |r| r.get(0),
+    )?;
+    if count >= 8 {
+        return Err("device limit reached".into());
+    }
+    tx.execute(
+        "INSERT INTO devices(fingerprint,username,label,revision,expires_at)
+         VALUES (?1,?2,?3,?4,?5)",
+        params![fingerprint.to_ascii_lowercase(), username, label, revision, expires_at],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn authorized_device(dir: &Path, fingerprint: &str) -> Result<bool> {
+    if fingerprint.len() != 64 || !fingerprint.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Ok(false);
     }
     let db = connection(dir)?;
-    let record: Option<(String, bool)> = db
+    let active: Option<bool> = db
         .query_row(
-            "SELECT password_phc,disabled FROM users WHERE username=?1",
-            [username],
-            |row| Ok((row.get(0)?, row.get::<_, i64>(1)? != 0)),
+            "SELECT u.disabled=0 AND d.disabled=0 AND d.revision=u.revision
+                    AND d.expires_at>?2
+             FROM devices d JOIN users u ON u.username=d.username
+             WHERE d.fingerprint=?1",
+            params![fingerprint.to_ascii_lowercase(), unix_seconds()?],
+            |row| row.get(0),
         )
         .optional()?;
-    // Hash-verification work is deliberately performed for missing/disabled
-    // accounts, reducing username enumeration from response timing.
-    let dummy = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXJhbmRvbXNhbHQxMjM0NTY$+w/0X+MZSTWzPmM9EFhYQexbawefxG4TOGsvrPD/GHA";
-    let (phc, disabled, found) = match record {
-        Some((hash, disabled)) => (hash, disabled, true),
-        None => (dummy.to_owned(), true, false),
-    };
-    let valid = verify_password(&phc, password);
-    Ok(found && !disabled && valid)
+    Ok(active.unwrap_or(false))
 }
+
+pub fn revoke_device(dir: &Path, fingerprint: &str) -> Result<()> {
+    if fingerprint.len() != 64 || !fingerprint.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("expected SHA256 certificate fingerprint".into());
+    }
+    let db = connection(dir)?;
+    if db.execute(
+        "UPDATE devices SET disabled=1 WHERE fingerprint=?1 AND disabled=0",
+        [fingerprint.to_ascii_lowercase()],
+    )? != 1 {
+        return Err("active device not found".into());
+    }
+    Ok(())
+}
+
+fn unix_seconds() -> Result<i64> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs() as i64)
+}
+
 
 fn list(dir: &Path) -> Result<()> {
     let db = connection(dir)?;
@@ -221,6 +332,7 @@ fn usage() {
          fedup-users disable <users-dir> <username>\n\
          fedup-users enable <users-dir> <username>\n\
          fedup-users list <users-dir>\n\
+         fedup-users revoke-device <users-dir> <cert-sha256>\n\
          fedup-users check <users-dir> <username> --password-stdin\n\
          Passwords must NEVER be passed in argv or shell environment variables."
     );
@@ -241,6 +353,9 @@ pub fn run_cli() -> Result<()> {
         }
         [_, cmd, dir, user] if cmd == "disable" => disable(Path::new(dir), user, true),
         [_, cmd, dir, user] if cmd == "enable" => disable(Path::new(dir), user, false),
+        [_, cmd, dir, fingerprint] if cmd == "revoke-device" => {
+            revoke_device(Path::new(dir), fingerprint)
+        },
         [_, cmd, dir, user, flag] if cmd == "check" && flag == "--password-stdin" => {
             let pass = stdin_password()?;
             if authenticate(Path::new(dir), user, &pass)? {
@@ -325,4 +440,31 @@ mod tests {
         assert!(verify_password(&hash, password));
         fs::remove_dir_all(dir).unwrap();
     }
+    #[test]
+    fn account_revision_revokes_all_devices_and_prevents_stale_enrollments() {
+        let dir = isolated();
+        let pass = b"long-test-passphrase-device";
+        add(&dir, "family", pass).unwrap();
+        let revision = authenticate_revision(&dir, "family", pass)
+            .unwrap().unwrap();
+        let fp = "a1".repeat(32);
+        register_device(&dir, "family", revision, "phone", &fp, unix_seconds().unwrap()+600).unwrap();
+        assert!(authorized_device(&dir, &fp).unwrap());
+        assert!(register_device(&dir, "family", revision, "phone", &"b1".repeat(32), unix_seconds().unwrap()+600).is_err());
+        disable(&dir, "family", true).unwrap();
+        assert!(!authorized_device(&dir, &fp).unwrap());
+        disable(&dir, "family", false).unwrap();
+        assert!(!authorized_device(&dir, &fp).unwrap());
+        assert!(register_device(&dir, "family", revision, "second", &"b2".repeat(32), unix_seconds().unwrap()+600).is_err());
+        change_password(&dir, "family", b"new-very-long-password").unwrap();
+        assert!(!authorized_device(&dir, &fp).unwrap());
+        let new_rev=authenticate_revision(&dir,"family",b"new-very-long-password").unwrap().unwrap();
+        let fp2="b2".repeat(32);
+        register_device(&dir,"family",new_rev,"phone-new",&fp2,unix_seconds().unwrap()+600).unwrap();
+        assert!(authorized_device(&dir,&fp2).unwrap());
+        revoke_device(&dir,&fp2).unwrap();
+        assert!(!authorized_device(&dir,&fp2).unwrap());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
 }
