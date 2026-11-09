@@ -147,6 +147,9 @@ if [[ "$AUTH_MODE" == edge ]]; then
 {
     auto_https off
     admin off
+    # Synthetic test clients using an IP URL omit SNI; real Android uses
+    # the HTTPS domain. Use a trusted test-name fallback only in this lab.
+    default_sni localhost
 }
 https://localhost:7443 {
     bind 172.31.44.1
