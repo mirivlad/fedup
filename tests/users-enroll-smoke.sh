@@ -21,7 +21,7 @@ SECRET="test-only-enrollment-passphrase-123"
 printf '%s\n' "$SECRET" | "$USERS" add "$TMP/users" family --password-stdin
 
 # Disposable P-256 CA. This key MUST NEVER be used on a real server.
-openssl ecparam -genkey -name prime256v1 -noout -out "$TMP/ca.key"
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$TMP/ca.key"
 openssl req -new -x509 -sha256 -days 10 -key "$TMP/ca.key" \
   -subj "/CN=Disposable FedUp CA" \
   -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
