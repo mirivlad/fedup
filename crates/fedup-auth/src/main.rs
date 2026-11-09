@@ -196,13 +196,15 @@ async fn enroll_device(
         let csr_sha256 = hex::encode(Sha256::digest(csr_pem.as_bytes()));
         let (saved_cert, saved_fp) = fedup_users::register_signed_device(
             &users,
-            &username,
-            revision,
-            &device,
-            &csr_sha256,
-            &issued.fingerprint_sha256,
-            issued.expires_at,
-            &issued.certificate_pem,
+            fedup_users::SignedDevice {
+                username: &username,
+                revision,
+                label: &device,
+                csr_sha256: &csr_sha256,
+                fingerprint: &issued.fingerprint_sha256,
+                expires_at: issued.expires_at,
+                certificate_pem: &issued.certificate_pem,
+            },
         )
         .map_err(|_| StatusCode::CONFLICT)?;
         // Duplicate, authenticated retries receive the same originally
