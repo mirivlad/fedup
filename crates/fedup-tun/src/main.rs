@@ -3,6 +3,7 @@
 //! This version forwards only packets between the fixed client and server,
 //! or a single synthetic egress host, inside operator-controlled network namespaces.
 
+mod app_tunnel;
 mod proof;
 
 use bytes::Bytes;
@@ -48,6 +49,7 @@ const MAX_ESTABLISHED_SESSIONS: usize = 32;
 struct SessionAdmission {
     established: Arc<Semaphore>,
     active: Arc<Semaphore>,
+    app_proof: Option<Arc<proof::DeviceProof>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -55,6 +57,7 @@ enum ServerMode {
     LabRaw,
     LabH2,
     InternetV4H2,
+    InternetV4AppProof,
 }
 
 impl ServerMode {
@@ -63,7 +66,11 @@ impl ServerMode {
     }
 
     fn internet_v4(self) -> bool {
-        self == Self::InternetV4H2
+        matches!(self, Self::InternetV4H2 | Self::InternetV4AppProof)
+    }
+
+    fn app_proof(self) -> bool {
+        self == Self::InternetV4AppProof
     }
 }
 
@@ -627,6 +634,10 @@ async fn server_session(
         .try_acquire_owned()
         .map_err(|_| "too many established TLS sessions")?;
     drop(handshake_slot);
+    if mode.app_proof() {
+        let proof = admission.app_proof.clone().ok_or("missing app proof verifier")?;
+        return app_tunnel::serve(tls, tun, authorization.clone(), admission, proof).await;
+    }
     let peer = tls
         .get_ref()
         .1
@@ -709,9 +720,17 @@ async fn server(
     } else {
         verifier
     };
-    let mut config = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
-        .with_client_cert_verifier(verifier.build()?)
-        .with_single_cert(ca_certs(certificate)?, load_key(key)?)?;
+    let tls_builder = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13]);
+    let mut config = if mode.app_proof() {
+        // Ordinary browser TLS: never request a client cert in this mode.
+        tls_builder
+            .with_no_client_auth()
+            .with_single_cert(ca_certs(certificate)?, load_key(key)?)?
+    } else {
+        tls_builder
+            .with_client_cert_verifier(verifier.build()?)
+            .with_single_cert(ca_certs(certificate)?, load_key(key)?)?
+    };
     if mode.internet_v4() {
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     } else if mode.http2() {
@@ -726,6 +745,11 @@ async fn server(
     let admission = Arc::new(SessionAdmission {
         established: Arc::new(Semaphore::new(MAX_ESTABLISHED_SESSIONS)),
         active: Arc::new(Semaphore::new(1)),
+        app_proof: if mode.app_proof() {
+            Some(Arc::new(proof::DeviceProof::new(&fs::read(ca)?)?))
+        } else {
+            None
+        },
     });
     println!(
         "FedUp {} server listening on {listen}; one active IP tunnel",
@@ -811,6 +835,7 @@ fedup-tun client <private-server-ip:port> <tun-name> <enrolled-device-dir> [--pa
 fedup-tun server-h2 <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <allowlist.txt>
 fedup-tun server-h2-accounts <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <users-dir>
 fedup-tun server-vps-v4 <listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <users-dir> --unsafe-experimental-public-egress
+fedup-tun server-vps-proof-v4 <listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <users-dir> --unsafe-experimental-public-egress
 fedup-tun client-h2 <private-server-ip:port> <tun-name> <enrolled-device-dir> [--passphrase-stdin]
 fedup-tun probe-h2 <private-server-ip:port> <enrolled-device-dir> [--passphrase-stdin]
 fedup-tun client-vps-v4 <private-test-server-ip:port> <tun-name> <device-dir> [--passphrase-stdin]
@@ -869,6 +894,20 @@ async fn main() {
                     Path::new(key),
                     DeviceAuthorization::AccountDatabase(PathBuf::from(users)),
                     ServerMode::InternetV4H2,
+                )
+                .await
+            }
+            [_, cmd, bind, tun, ca, cert, key, users, flag]
+                if cmd == "server-vps-proof-v4" && flag == "--unsafe-experimental-public-egress" =>
+            {
+                server(
+                    bind.parse()?,
+                    tun,
+                    Path::new(ca),
+                    Path::new(cert),
+                    Path::new(key),
+                    DeviceAuthorization::AccountDatabase(PathBuf::from(users)),
+                    ServerMode::InternetV4AppProof,
                 )
                 .await
             }
