@@ -54,6 +54,21 @@ jobs:
       - name: Verify ALPN h2, bidirectional flow control and revocation
         run: bash tests/h2-smoke.sh
 
+  core-portability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Windows and Android Rust standard library targets
+        run: rustup target add x86_64-pc-windows-gnu aarch64-linux-android
+      - name: Check OS-independent core for Windows
+        run: cargo check -p fedup-core --target x86_64-pc-windows-gnu
+      - name: Check OS-independent core for Android
+        run: cargo check -p fedup-core --target aarch64-linux-android
+      - name: Check OS-independent core for Linux
+        run: cargo test -p fedup-core
+
   tun-namespace:
     runs-on: ubuntu-latest
     timeout-minutes: 20
