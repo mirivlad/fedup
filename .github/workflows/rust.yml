@@ -32,3 +32,7 @@ jobs:
         run: cargo build -p fedup-link -p fedup-admin
       - name: Exercise end-to-end link and revocation
         run: bash tests/link-smoke.sh
+      - name: Build offline enrollment issuer
+        run: cargo build -p fedup-enroll
+      - name: Verify one-time CSR certificate issuance and recovery
+        run: bash tests/enroll-smoke.sh
