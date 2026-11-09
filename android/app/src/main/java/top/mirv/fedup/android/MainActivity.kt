@@ -1,6 +1,9 @@
 package top.mirv.fedup.android
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.net.VpnService
+import android.os.Build
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -22,10 +25,12 @@ class MainActivity : Activity() {
         const val PICK_INVITE = 11
         const val SAVE_REQUEST = 12
         const val PICK_CERT = 13
+        const val VPN_PERMISSION = 14
         const val MAX_FILE = 32768
     }
 
     private val enrollment by lazy { EnrollmentManager(this) }
+    private var pendingLabEndpoint: String? = null
     private lateinit var status: TextView
     private lateinit var invitation: EditText
     private lateinit var certificate: EditText
@@ -38,7 +43,7 @@ class MainActivity : Activity() {
             message(when {
                 found == null -> "Ключ устройства ещё не создан."
                 found.enrolled -> "Сертификат " + found.device +
-                    " проверен. Android VPN пока не подключён."
+                    " проверен. Доступен только тестовый VPN для четырёх адресов, НЕ для Интернета."
                 else -> "Ключ устройства " + found.device +
                     " создан в Android Keystore. Ожидается сертификат.\nCA SHA-256: " +
                     found.caPin
@@ -83,8 +88,9 @@ class MainActivity : Activity() {
         }
         label(layout, "FedUp — регистрация Android")
         layout.addView(TextView(this).apply {
-            text = "Приватный ключ создаётся на телефоне и не передаётся администратору. " +
-                "Это диагностическая сборка: VPN не работает и Always-on отключён."
+            text = "Приватный ключ создаётся на телефоне. Здесь доступен только " +
+                "лабораторный VPN для четырёх фиксированных адресов; обычный Интернет " +
+                "и DNS НЕ защищены. Always-on отключён."
         })
         status = TextView(this).apply { textSize = 15f; setPadding(0, 16, 0, 16) }
         layout.addView(status)
@@ -130,7 +136,7 @@ class MainActivity : Activity() {
                         certificate.text.clear()
                         message("Сертификат " + identity.device +
                             " проверен, приватный ключ остался на телефоне. " +
-                            "VPN-транспорт пока не подключён.")
+                            "Лабораторный VPN можно проверить после подключения к тестовому серверу.")
                     }
                 } catch (error: Exception) {
                     runOnUiThread { message("Сертификат отклонён: " + error.message) }
@@ -162,6 +168,35 @@ class MainActivity : Activity() {
                 }
             }.start()
         }
+        action(layout, "Лаб: подключить только тестовые IP (не защищает Интернет)") {
+            val address = endpoint.text.toString().trim()
+            require(enrollment.device()?.enrolled == true) {
+                "Сначала получите сертификат устройства"
+            }
+            require(NativePacketPolicy.available()) { "Rust-модуль недоступен" }
+            TlsProbe.Endpoint.parse(address)
+            AlertDialog.Builder(this)
+                .setTitle("Только лабораторный VPN")
+                .setMessage(
+                    "Android заменит действующий VPN на FedUp LAB. " +
+                        "В туннель попадут только 10.77.0.1, 10.88.0.10 и два " +
+                        "IPv6-адреса. Весь остальной Интернет и DNS останутся " +
+                        "без защиты FedUp. Используйте только на тестовом устройстве."
+                )
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Продолжить") { _, _ ->
+                    pendingLabEndpoint = address
+                    val permission = VpnService.prepare(this)
+                    if (permission == null) startLab(address)
+                    else startActivityForResult(permission, VPN_PERMISSION)
+                }
+                .show()
+        }
+        action(layout, "Отключить лабораторный VPN") {
+            startService(Intent(this, FedUpVpnService::class.java)
+                .setAction(FedUpVpnService.STOP))
+            message("Запрошено отключение лабораторного VPN.")
+        }
         label(layout, "Диагностика")
         action(layout, "Проверить Rust-ядро") {
             message(if (NativePacketPolicy.available())
@@ -170,6 +205,19 @@ class MainActivity : Activity() {
         }
         setContentView(ScrollView(this).apply { addView(layout) })
         showDeviceState()
+    }
+
+    private fun startLab(address: String) {
+        val command = Intent(this, FedUpVpnService::class.java)
+            .setAction(FedUpVpnService.START)
+            .putExtra(FedUpVpnService.ENDPOINT, address)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(command)
+        } else {
+            startService(command)
+        }
+        message("Лабораторный VPN запускается. Проверяйте статус в уведомлении Android. " +
+            "Это не полнофункциональная защита Интернета.")
     }
 
     private fun pick(code: Int) {
@@ -197,6 +245,16 @@ class MainActivity : Activity() {
     @Deprecated("Android platform document picker, no third-party dependencies")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == VPN_PERMISSION) {
+            val address = pendingLabEndpoint
+            pendingLabEndpoint = null
+            if (resultCode == RESULT_OK && address != null) {
+                startLab(address)
+            } else {
+                message("Разрешение VPN не предоставлено: подключение отменено.")
+            }
+            return
+        }
         if (resultCode != RESULT_OK || data?.data == null) return
         try {
             val uri = requireNotNull(data.data)
