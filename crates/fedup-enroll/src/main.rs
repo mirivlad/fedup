@@ -376,13 +376,16 @@ fn run() -> Result<()> {
             request(Path::new(inv), Path::new(csr), Path::new(out))
         }
         [_, action, dir, ca, key, req, out, flag]
-            if action == "approve" && flag == "--unsafe-lab-plaintext-ca" => approve(
-            Path::new(dir),
-            Path::new(ca),
-            Path::new(key),
-            Path::new(req),
-            Path::new(out),
-        ),
+            if action == "approve" && flag == "--unsafe-lab-plaintext-ca" =>
+        {
+            approve(
+                Path::new(dir),
+                Path::new(ca),
+                Path::new(key),
+                Path::new(req),
+                Path::new(out),
+            )
+        }
         [_, action, dir, id, out] if action == "recover" => {
             recover(Path::new(dir), id, Path::new(out))
         }
