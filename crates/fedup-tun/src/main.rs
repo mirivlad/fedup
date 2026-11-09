@@ -4,7 +4,7 @@
 //! or a single synthetic egress host, inside operator-controlled network namespaces.
 
 use bytes::Bytes;
-use fedup_core::{Direction, IpPolicy, LAB_MTU};
+use fedup_core::{Direction, InternetV4Policy, IpPolicy, LAB_MTU};
 use fedup_identity::{decrypt_pkcs8, device_connection, read_password};
 use fedup_protocol::{encode_header, parse_header, Frame, FrameKind, HEADER_LEN};
 use h2::{client as h2_client, server as h2_server, RecvStream, SendStream};
@@ -35,6 +35,24 @@ const MAX_PACKET: usize = LAB_MTU;
 const TUN_BUFFER: usize = 65536;
 const MAX_ALLOWLIST_BYTES: u64 = 65536;
 const STREAM: u32 = 1;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ServerMode {
+    LabRaw,
+    LabH2,
+    InternetV4H2,
+}
+
+impl ServerMode {
+    fn http2(self) -> bool {
+        self != Self::LabRaw
+    }
+
+    fn internet_v4(self) -> bool {
+        self == Self::InternetV4H2
+    }
+}
+
 
 fn ca_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
     let mut reader = BufReader::new(File::open(path)?);
@@ -182,6 +200,7 @@ async fn forward<T>(
     tun: Arc<Tun>,
     is_client: bool,
     revocation: Option<(DeviceAuthorization, String)>,
+    internet_v4: bool,
 ) -> Result<()>
 where
     T: AsyncRead + AsyncWrite + Unpin,
@@ -197,15 +216,24 @@ where
         Direction::ClientToServer
     };
     let (mut incoming, mut outgoing) = tokio::io::split(stream);
-    // The identical OS-independent packet ACL is used in all transport modes.
-    let policy = IpPolicy::isolated_lab();
+    // Same Rust admission for client/server. Internet access does not permit
+    // spoofing the phone's source or contacting private VPS management networks.
+    let lab_policy = IpPolicy::isolated_lab();
+    let internet_policy = InternetV4Policy;
+    let admits = |packet: &[u8], direction| {
+        if internet_v4 {
+            internet_policy.admits(packet, direction)
+        } else {
+            lab_policy.admits(packet, direction)
+        }
+    };
     let rx_tun = tun.clone();
     let tx_tun = tun;
     let send = async {
         let mut packet = vec![0u8; TUN_BUFFER];
         loop {
             let n = rx_tun.recv(&mut packet).await?;
-            if !policy.admits(&packet[..n], out_dir) {
+            if !admits(&packet[..n], out_dir) {
                 continue;
             }
             let frame = Frame::new(FrameKind::Datagram, STREAM, packet[..n].to_vec())?;
@@ -220,7 +248,7 @@ where
             if frame.kind != FrameKind::Datagram || frame.stream_id != STREAM {
                 return Err("unexpected frame in active IP tunnel".into());
             }
-            if !policy.admits(&frame.payload, in_dir) {
+            if !admits(&frame.payload, in_dir) {
                 return Err("invalid or spoofed IP packet from peer".into());
             }
             tx_tun.send_all(&frame.payload).await?;
@@ -311,6 +339,7 @@ async fn h2_server_session(
     tls: tokio_rustls::server::TlsStream<TcpStream>,
     tun: Arc<Tun>,
     revocation: (DeviceAuthorization, String),
+    internet_v4: bool,
 ) -> Result<()> {
     if tls.get_ref().1.alpn_protocol() != Some(b"h2".as_slice()) {
         return Err("ALPN h2 required for HTTP/2 TUN".into());
@@ -368,7 +397,7 @@ async fn h2_server_session(
         }
         Ok::<(), Box<dyn Error + Send + Sync>>(())
     });
-    let result = forward(tun_end, tun, false, Some(revocation)).await;
+    let result = forward(tun_end, tun, false, Some(revocation), internet_v4).await;
     driver.abort();
     bridge.abort();
     result
@@ -405,7 +434,7 @@ async fn h2_client_session(
     // Only create TUN after TLS verification and HTTP/2 authorization.
     let tun = create_tun(tun_name)?;
     println!("FedUp genuine HTTP/2 IP tunnel authenticated; no host routing was changed");
-    let result = forward(tun_end, tun, true, None).await;
+    let result = forward(tun_end, tun, true, None, false).await;
     bridge.abort();
     driver.abort();
     result
@@ -442,7 +471,7 @@ async fn server_session(
     acceptor: TlsAcceptor,
     tun: Arc<Tun>,
     authorization: &DeviceAuthorization,
-    http2: bool,
+    mode: ServerMode,
 ) -> Result<()> {
     let mut tls = timeout(IO_TIMEOUT, acceptor.accept(socket)).await??;
     let peer = tls
@@ -455,13 +484,19 @@ async fn server_session(
     if !authorized(authorization, &fp)? {
         return Err("device not authorized".into());
     }
-    if http2 {
-        return h2_server_session(tls, tun, (authorization.clone(), fp)).await;
+    if mode.http2() {
+        return h2_server_session(
+            tls,
+            tun,
+            (authorization.clone(), fp),
+            mode.internet_v4(),
+        )
+        .await;
     }
     let req = read_frame(&mut tls).await?;
     expect_open(req)?;
     open(&mut tls).await?;
-    forward(tls, tun, false, Some((authorization.clone(), fp))).await
+    forward(tls, tun, false, Some((authorization.clone(), fp)), false).await
 }
 
 async fn server(
@@ -471,11 +506,20 @@ async fn server(
     certificate: &Path,
     key: &Path,
     authorization: DeviceAuthorization,
-    http2: bool,
+    mode: ServerMode,
 ) -> Result<()> {
-    require_isolated_network_namespace()?;
-    if !private_lab_ip(listen) {
-        return Err("lab server must bind loopback or private IPv4 address".into());
+    if mode.internet_v4() {
+        // This opt-in mode is intended for a fresh operator-controlled VPS.
+        // Server never modifies host routes, sysctls or firewalls; the
+        // independent, explicitly invoked egress setup is responsible.
+        if !listen.is_ipv4() {
+            return Err("VPS IPv4 server needs an IPv4 listener".into());
+        }
+    } else {
+        require_isolated_network_namespace()?;
+        if !private_lab_ip(listen) {
+            return Err("lab server must bind loopback or private IPv4 address".into());
+        }
     }
     if listen.is_ipv6() {
         return Err("IPv6 outer transport not configured in this lab".into());
@@ -494,17 +538,18 @@ async fn server(
             rustls::server::WebPkiClientVerifier::builder(Arc::new(roots(ca)?)).build()?,
         )
         .with_single_cert(ca_certs(certificate)?, load_key(key)?)?;
-    if http2 {
+    if mode.http2() {
         config.alpn_protocols = vec![b"h2".to_vec()];
     }
     let acceptor = TlsAcceptor::from(Arc::new(config));
     let tun = create_tun(name)?;
     let listener = TcpListener::bind(listen).await?;
-    println!("FedUp IP lab server listening on {listen}; one device at a time");
+    println!("FedUp {} server listening on {listen}; one device at a time",
+        if mode.internet_v4() { "experimental VPS IPv4" } else { "isolated lab" });
     loop {
         let (socket, _) = listener.accept().await?;
         if let Err(error) =
-            server_session(socket, acceptor.clone(), tun.clone(), &authorization, http2).await
+            server_session(socket, acceptor.clone(), tun.clone(), &authorization, mode).await
         {
             eprintln!("IP session closed: {error}");
         }
@@ -553,7 +598,7 @@ async fn client(
     // silently bypass the tunnel (but OS routing must be managed separately).
     let tun = create_tun(name)?;
     println!("FedUp IP lab authenticated and ready; configure addresses inside namespace");
-    forward(tls, tun, true, None).await
+    forward(tls, tun, true, None, false).await
 }
 
 fn usage() {
@@ -563,13 +608,16 @@ fedup-tun server <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <serv
 fedup-tun client <private-server-ip:port> <tun-name> <enrolled-device-dir> [--passphrase-stdin]
 fedup-tun server-h2 <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <allowlist.txt>
 fedup-tun server-h2-accounts <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <users-dir>
+fedup-tun server-vps-v4 <listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <users-dir> --unsafe-experimental-public-egress
 fedup-tun client-h2 <private-server-ip:port> <tun-name> <enrolled-device-dir> [--passphrase-stdin]
 fedup-tun probe-h2 <private-server-ip:port> <enrolled-device-dir> [--passphrase-stdin]
 
 Fixed peers: 10.77.0.2 <-> 10.77.0.1 or 10.88.0.10, and
 fd42:fed0::2 <-> fd42:fed0::1 or fd42:fed1::10.
-No Internet egress, host DNS modification, full-tunnel routing or kill switch.
-Use only in controlled, separate Linux network namespaces."#
+Lab modes: no Internet egress, use only isolated Linux network namespaces.
+VPS-v4: separate experimental opt-in, IPv4 only, ONE device, never installs NAT,
+addresses, DNS or firewall itself. Administrator must configure explicit egress
+rules, and IPv6 remains unsupported. Not a production VPN or leak-proof client."#
     );
 }
 
@@ -587,7 +635,11 @@ async fn main() {
                     Path::new(cert),
                     Path::new(key),
                     DeviceAuthorization::Allowlist(PathBuf::from(allow)),
-                    cmd == "server-h2",
+                    if cmd == "server-h2" {
+                        ServerMode::LabH2
+                    } else {
+                        ServerMode::LabRaw
+                    },
                 )
                 .await
             }
@@ -599,7 +651,22 @@ async fn main() {
                     Path::new(cert),
                     Path::new(key),
                     DeviceAuthorization::AccountDatabase(PathBuf::from(users)),
-                    true,
+                    ServerMode::LabH2,
+                )
+                .await
+            }
+            [_, cmd, bind, tun, ca, cert, key, users, flag]
+                if cmd == "server-vps-v4"
+                    && flag == "--unsafe-experimental-public-egress" =>
+            {
+                server(
+                    bind.parse()?,
+                    tun,
+                    Path::new(ca),
+                    Path::new(cert),
+                    Path::new(key),
+                    DeviceAuthorization::AccountDatabase(PathBuf::from(users)),
+                    ServerMode::InternetV4H2,
                 )
                 .await
             }
