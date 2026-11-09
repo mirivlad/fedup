@@ -41,6 +41,19 @@ jobs:
       - name: Verify encrypted key creation and end-to-end mTLS
         run: bash tests/device-smoke.sh
 
+  h2-laboratory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup show
+      - name: Build real HTTP/2 and identity tools
+        run: cargo build -p fedup-h2-lab -p fedup-enroll -p fedup-identity -p fedup-admin
+      - name: Verify ALPN h2, bidirectional flow control and revocation
+        run: bash tests/h2-smoke.sh
+
   tun-namespace:
     runs-on: ubuntu-latest
     timeout-minutes: 20
