@@ -6,7 +6,7 @@
 //!
 //! No VPN socket, device identity, transport, or Android routing is created.
 
-use fedup_core::{Direction, IpPolicy, LAB_MTU};
+use fedup_core::{Direction, InternetV4Policy, IpPolicy, LAB_MTU};
 use jni::objects::{JByteArray, JObject};
 use jni::sys::jboolean;
 use jni::JNIEnv;
@@ -54,6 +54,40 @@ pub extern "system" fn Java_top_mirv_fedup_android_NativePacketPolicy_nativeAdmi
             return 0;
         };
         u8::from(admit_untrusted(&bytes, client_to_server != 0))
+    }))
+    .unwrap_or(0)
+}
+
+/// Experimental full IPv4 gateway policy: exact phone source/destination,
+/// public IPv4 remote only, strict packet structure, no IPv6 admission.
+/// JNI exception or native failure is always denial.
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "system" fn Java_top_mirv_fedup_android_NativePacketPolicy_nativeAdmitInternetV4(
+    env: JNIEnv<'_>,
+    _receiver: JObject<'_>,
+    packet: JByteArray<'_>,
+    client_to_server: jboolean,
+) -> jboolean {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if client_to_server > 1 {
+            return 0;
+        }
+        let Ok(length) = env.get_array_length(&packet) else {
+            return 0;
+        };
+        if length < 20 || length as usize > LAB_MTU {
+            return 0;
+        }
+        let Ok(bytes) = env.convert_byte_array(&packet) else {
+            return 0;
+        };
+        let direction = if client_to_server != 0 {
+            Direction::ClientToServer
+        } else {
+            Direction::ServerToClient
+        };
+        u8::from(InternetV4Policy.admits(&bytes, direction))
     }))
     .unwrap_or(0)
 }
