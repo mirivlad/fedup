@@ -99,10 +99,25 @@ if [[ "$FAULT_MODE" == 1 ]]; then
   ip -n "$EN" link set "$BE" up
   ip -n "$CN" route add 10.88.0.10/32 via 172.31.55.1 dev "$BW" metric 100
   ip -n "$CN" -6 route add fd42:fed1::10/128 via fd42:fed2::1 dev "$BW" metric 4096
+  # Wait until IPv6 duplicate-address detection completes on both new veths.
+  sleep 1.3
   # Prove the bypass is real BEFORE installing a deny policy.
-  timeout 8 ip netns exec "$CN" ping -n -c 1 -W 2 10.88.0.10 >/dev/null
-  timeout 8 ip netns exec "$CN" ping -6 -n -c 1 -W 2 fd42:fed1::10 >/dev/null
-  echo "Synthetic direct bypass is reachable WITHOUT kill switch: confirmed"
+  ip -n "$CN" route get 10.88.0.10
+  ip -n "$CN" -6 route get fd42:fed1::10
+  if ! timeout 12 ip netns exec "$CN" ping -n -c 3 -W 2 10.88.0.10 >/dev/null; then
+    echo "FAIL: synthetic IPv4 bypass is not actually reachable" >&2
+    ip -n "$CN" addr show dev "$BW" >&2
+    ip -n "$EN" addr show dev "$BE" >&2
+    exit 1
+  fi
+  echo "Synthetic direct IPv4 bypass: CONFIRMED"
+  if ! timeout 12 ip netns exec "$CN" ping -6 -n -c 3 -W 2 fd42:fed1::10 >/dev/null; then
+    echo "FAIL: synthetic IPv6 bypass is not actually reachable" >&2
+    ip -n "$CN" -6 route >&2
+    ip -n "$EN" -6 addr show dev "$BE" >&2
+    exit 1
+  fi
+  echo "Synthetic direct IPv6 bypass: CONFIRMED"
   # nftables applies only to the isolated CLIENT namespace.
   ip netns exec "$CN" nft -f - <<'NFT'
 table inet fedup_lab {
