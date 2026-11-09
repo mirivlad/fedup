@@ -1,0 +1,22 @@
+[package]
+name = "fedup-enroll"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Offline one-time enrollment invitations and CSR approval"
+
+[dependencies]
+hex = "0.4"
+rand = "0.8"
+rcgen = { version = "=0.14.10", default-features = false, features = ["ring", "pem", "x509-parser"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+rustls-pemfile = "2.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+subtle = "2.6"
+time = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
