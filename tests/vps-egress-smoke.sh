@@ -147,6 +147,22 @@ FEDUP_EGRESS_STATE="$TMP/egress-state" \
   bash scripts/vps-egress-v4.sh install futserver "$SW" \
   --acknowledge-host-network-changes
 
+# A non-authenticated client keeps its TCP socket open without sending TLS.
+# An ordinary VPN client MUST still be served, instead of being stuck behind
+# the first idle handshake. This is an offline, synthetic slow-client probe.
+ip netns exec "$CN" python3 -u -c '
+import socket,sys,time
+with socket.create_connection(("172.31.44.1",7443),timeout=3) as s:
+    open(sys.argv[1],"w").close()
+    time.sleep(12)
+' "$TMP/idle-ready" >"$TMP/idle.log" 2>&1 &
+PIDS="$PIDS $!"
+for _ in $(seq 1 30); do
+  [[ -f "$TMP/idle-ready" ]] && break
+  sleep 0.1
+done
+[[ -f "$TMP/idle-ready" ]] || { cat "$TMP/idle.log" >&2; exit 1; }
+echo "Unauthenticated idle TLS socket deliberately held open"
 printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" \
   client-vps-v4 172.31.44.1:7443 futclient "$TMP/device" \
   --passphrase-stdin >"$TMP/client.log" 2>&1 &
