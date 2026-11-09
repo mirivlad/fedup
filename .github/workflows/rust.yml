@@ -60,6 +60,14 @@ jobs:
           mkdir -p "$RUNNER_TEMP/fedup-profile"
           sudo env FEDUP_CAPTURE_PCAP="$RUNNER_TEMP/fedup-profile/tun.pcap" bash tests/tun-smoke.sh
           sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/fedup-profile/tun.pcap"
+          sudo chmod 0644 "$RUNNER_TEMP/fedup-profile/tun.pcap"
+          stat -c 'Synthetic PCAP permissions: %a %U:%G %s bytes' "$RUNNER_TEMP/fedup-profile/tun.pcap"
+          python3 - "$RUNNER_TEMP/fedup-profile/tun.pcap" <<'PY'
+          import os,sys
+          assert os.access(sys.argv[1], os.R_OK), "PCAP inaccessible to runner"
+          with open(sys.argv[1], "rb") as capture:
+              assert capture.read(4), "empty PCAP"
+          PY
           python3 tools/traffic-profile.py "$RUNNER_TEMP/fedup-profile/tun.pcap" --output "$RUNNER_TEMP/fedup-profile/report.json"
           cat "$RUNNER_TEMP/fedup-profile/report.json"
           python3 - "$RUNNER_TEMP/fedup-profile/report.json" <<'PY'
