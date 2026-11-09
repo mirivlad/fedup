@@ -303,13 +303,15 @@ async fn client(
 
 fn usage() {
     eprintln!(
-        "EXPERIMENTAL TCP link, NOT a VPN:\n\
-         fedup-link server <listen-ip:port> <loopback-target-ip:port> <ca.pem> <server.pem> <server.key> <allowlist.txt> [--allow-public-bind]\n\
-         fedup-link client <loopback-listen-ip:port> <server-ip:port> <server-dns-name> <ca.pem> <client.pem> <encrypted-key.pem> --encrypted-key [--passphrase-stdin]\n\
-         fedup-link client <...> <plaintext-key.pem> --unsafe-lab-plaintext-key (temporary test compatibility)\n\\
-         fedup-link client-device <local-ip:port> <server-ip:port> <device-dir> [--passphrase-stdin]\n\
-         fedup-link fingerprint <client.pem>\n\
-         Both sides require operator-controlled certificates; the allowlist contains one SHA-256 certificate fingerprint per line."
+        r#"EXPERIMENTAL TCP link, NOT a VPN:
+fedup-link server <listen-ip:port> <loopback-target-ip:port> <ca.pem> <server.pem> <server.key> <allowlist.txt> [--allow-public-bind]
+fedup-link client <loopback-listen-ip:port> <server-ip:port> <server-dns-name> <ca.pem> <client.pem> <encrypted-key.pem> --encrypted-key [--passphrase-stdin]
+fedup-link client <...> <plaintext-key.pem> --unsafe-lab-plaintext-key (temporary test compatibility)
+fedup-link client-device <local-ip:port> <server-ip:port> <device-dir> [--passphrase-stdin]
+fedup-link fingerprint <client.pem>
+
+Client-device loads server name, trusted CA and client certificate from the device directory.
+The TCP target is configured only by the server operator. No arbitrary destination proxy."#
     );
 }
 
