@@ -291,6 +291,48 @@ pub fn import_certificate(
     create_file(&device_dir.join("client.pem"), &cert.to_pem()?)
 }
 
+/// Resolve connection parameters from the imported identity and pinned CA.
+#[derive(Debug)]
+pub struct DeviceConnection {
+    pub server_name: String,
+    pub ca_path: std::path::PathBuf,
+    pub cert_path: std::path::PathBuf,
+    pub encrypted_key_path: std::path::PathBuf,
+}
+
+pub fn device_connection(device_dir: &Path) -> IdentityResult<DeviceConnection> {
+    private_directory(device_dir)?;
+    let metadata: DeviceMetadata =
+        serde_json::from_slice(&read_limited(&device_dir.join("device.json"), FILE_LIMIT)?)?;
+    if metadata.version != INVITE_VERSION
+        || !valid_device(&metadata.device)
+        || metadata.server_name.is_empty()
+        || metadata.server_name.len() > 253
+        || !metadata
+            .server_name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'))
+        || !valid_hex(&metadata.ca_sha256, 32)
+    {
+        return Err("device connection metadata is invalid".into());
+    }
+    let ca_path = device_dir.join("ca.pem");
+    let cert_path = device_dir.join("client.pem");
+    let key_path = device_dir.join("client-key.enc.pem");
+    if ca_hash(&read_limited(&ca_path, FILE_LIMIT)?)? != metadata.ca_sha256 {
+        return Err("device CA identity has changed since enrollment".into());
+    }
+    // Loading validates the type/size before either endpoint is used.
+    X509::from_pem(&read_limited(&cert_path, FILE_LIMIT)?)?;
+    let _ = read_limited(&key_path, KEY_LIMIT)?;
+    Ok(DeviceConnection {
+        server_name: metadata.server_name,
+        ca_path,
+        cert_path,
+        encrypted_key_path: key_path,
+    })
+}
+
 /// For headless automated TESTS only, read the password from stdin.
 /// Interactive usage reads directly from a terminal without echo.
 pub fn read_password(confirm: bool, password_stdin: bool) -> IdentityResult<Zeroizing<String>> {
