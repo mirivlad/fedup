@@ -24,6 +24,15 @@ def fixture():
                 "extension_ids": [0, 10, 13, 16],
             }],
         },
+        "https2_reference": {
+            "port": 9553,
+            "client_hello_count": 1,
+            "client_hello_visible": [{
+                "sni": None, "handshake_bytes": 300,
+                "offered_alpn": ["h2"], "cipher_suite_count": 20,
+                "extension_ids": [0, 11, 10, 16, 13],
+            }],
+        },
         "https_reference": {
             "port": 9443,
             "client_hello_count": 1,
@@ -40,6 +49,8 @@ class ObserverTests(unittest.TestCase):
     def test_detects_observable_differences_without_calling_them_vpn(self):
         result = module.assess(fixture())
         self.assertTrue(result["different_from_this_control"])
+        self.assertTrue(result["different_tls_shape_from_https2"])
+        self.assertTrue(result["https2_visible_differences_excluding_port"])
         self.assertFalse(result["vpn_confirmed"])
         self.assertIsNone(result["censorship_detection_rate"])
         features = {a["feature"] for a in result["passive_visible_differences"]}
@@ -51,8 +62,10 @@ class ObserverTests(unittest.TestCase):
     def test_same_hello_does_not_prove_the_tunnel_is_undetectable(self):
         control = fixture()
         control["https_reference"] = dict(control["fedup"])
+        control["https2_reference"] = dict(control["fedup"])
         result = module.assess(control)
         self.assertFalse(result["different_from_this_control"])
+        self.assertFalse(result["different_tls_shape_from_https2"])
         self.assertFalse(result["vpn_confirmed"])
         self.assertIn("not proof", " ".join(result["notes"]).lower())
 
@@ -63,6 +76,10 @@ class ObserverTests(unittest.TestCase):
             lambda f: f["fedup"]["client_hello_visible"][0].update(sni="private.example"),
             lambda f: f["fedup"]["client_hello_visible"][0].update(handshake_bytes=True),
             lambda f: f["fedup"].update(port=0),
+            lambda f: f["https2_reference"].update(client_hello_count=0),
+            lambda f: f["https2_reference"]["client_hello_visible"][0].update(
+                offered_alpn=["http/1.1"]
+            ),
         ):
             data = fixture()
             mutate(data)

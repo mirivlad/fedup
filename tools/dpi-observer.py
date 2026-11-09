@@ -42,11 +42,15 @@ def assess(observation):
         raise ValueError("unknown provenance; refuse non-synthetic report")
     fedup = observation.get("fedup")
     reference = observation.get("https_reference")
+    h2_reference = observation.get("https2_reference")
     tunnel = get_hello(fedup, "fedup")
     control = get_hello(reference, "https_reference")
-    if tunnel.get("sni") != "localhost" or control.get("sni") not in (
-        "localhost", None
-    ):
+    h2_control = get_hello(h2_reference, "https2_reference")
+    if "h2" not in h2_control["offered_alpn"]:
+        raise ValueError("HTTPS/2 control must offer ALPN h2")
+    if (tunnel.get("sni") != "localhost"
+            or control.get("sni") not in ("localhost", None)
+            or h2_control.get("sni") not in ("localhost", None)):
         raise ValueError("unexpected endpoint; refusing personal or real-world capture")
 
     comparisons = [
@@ -61,8 +65,24 @@ def assess(observation):
         for name, value, baseline in comparisons
         if value != baseline
     ]
+    # Exclude destination ports from the HTTP/2 protocol fingerprint comparison:
+    # ports 7443/9553 differ by laboratory design and trivially leak labels.
+    protocol_features = [
+        ("tls_handshake_bytes", "handshake_bytes"),
+        ("tls_offered_alpn", "offered_alpn"),
+        ("tls_cipher_suite_count", "cipher_suite_count"),
+        ("tls_extension_ids_in_order", "extension_ids"),
+    ]
+    h2_differences = [
+        {"feature": label, "fedup": tunnel[key], "control": h2_control[key]}
+        for label, key in protocol_features
+        if tunnel[key] != h2_control[key]
+    ]
     return {
-        "control": "local curl/OpenSSL HTTPS/1.1, NOT browser-matched HTTP/2",
+        "control": "curl/OpenSSL HTTPS/1.1 AND real nghttp/OpenSSL HTTPS/2; neither is Chromium",
+        "http2_control": "nghttp/OpenSSL TLS+ALPN h2; not Android, Firefox or Chromium",
+        "https2_visible_differences_excluding_port": h2_differences,
+        "different_tls_shape_from_https2": bool(h2_differences),
         "subject": "synthetic FedUp test connection, NOT physical Android",
         "passive_visible_differences": differences,
         "different_from_this_control": bool(differences),
@@ -71,6 +91,9 @@ def assess(observation):
         "notes": [
             "Port difference is lab topology, not an independent protocol signature.",
             "ALPN difference can simply distinguish HTTP/1.1 from HTTP/2.",
+            "HTTP/2 reference is a real web transport, but uses nghttp/OpenSSL TLS, not browsers.",
+            "Port is excluded from HTTPS/2 fingerprint comparison to prevent a trivial lab-only classifier.",
+            "The two requests do not yet have identical timing/size/workload.",
             "Visible TLS/flow differences are not proof the payload is a VPN.",
             "TLS 1.3 encrypts HTTP/2 payload and post-ServerHello handshake messages.",
             "A stateful adversary can also attempt active TLS/HTTP probes; this is not one.",
