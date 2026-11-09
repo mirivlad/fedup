@@ -35,7 +35,7 @@
 
 ## Experimental laboratory
 
-The current implementation includes a separate namespace-only **fedup-netguard** privileged nftables policy helper, and a Linux TUN IP-packet laboratory with a third isolated routed/DNS endpoint (docs/tun.md), a genuine HTTP/2 streaming laboratory, also bridged into the isolated TUN modes server-h2/client-h2 (docs/http2.md), alongside a dependency-free Rust framing codec, a one-shot **loopback-only** mTLS 1.3 Ping/Pong lab, and an experimental **single-destination TCP forwarder**. The forwarder requires mutually authenticated TLS, an explicit device certificate allowlist and a fixed operator-configured target. The Linux fedup-admin CLI can initialize, list, add and revoke those allowed certificate fingerprints with atomic file updates. A new fedup-device CLI creates **encrypted client keys and signed CSRs** locally, verifies issued certificates, and fedup-link client-device uses enrollment-pinned server trust. It is not a full VPN, web protocol, or production-ready Internet-facing server.
+The current implementation includes an OS-independent **fedup-core** IP packet ACL (cross-checked for Windows GNU and Android ARM64 Rust targets), a separate namespace-only **fedup-netguard** privileged nftables policy helper, and a Linux TUN IP-packet laboratory with a third isolated routed/DNS endpoint (docs/tun.md), a genuine HTTP/2 streaming laboratory, also bridged into the isolated TUN modes server-h2/client-h2 (docs/http2.md), alongside a dependency-free Rust framing codec, a one-shot **loopback-only** mTLS 1.3 Ping/Pong lab, and an experimental **single-destination TCP forwarder**. The forwarder requires mutually authenticated TLS, an explicit device certificate allowlist and a fixed operator-configured target. The Linux fedup-admin CLI can initialize, list, add and revoke those allowed certificate fingerprints with atomic file updates. A new fedup-device CLI creates **encrypted client keys and signed CSRs** locally, verifies issued certificates, and fedup-link client-device uses enrollment-pinned server trust. It is not a full VPN, web protocol, or production-ready Internet-facing server.
 
 On Linux with the Rust toolchain, OpenSSL and Python 3:
 
@@ -55,7 +55,11 @@ sudo env FEDUP_TUN_TRANSPORT=raw FEDUP_TUN_FAULT=1 bash tests/tun-smoke.sh
 sudo env FEDUP_TUN_TRANSPORT=h2 FEDUP_TUN_FAULT=1 bash tests/tun-smoke.sh
 # Loopback HTTP/2 + mTLS streaming fixture:
 bash tests/h2-smoke.sh
+# Pure Python safety tests for repeated PCAP reports:
+python3 tools/test-traffic-study.py
 ```
+
+For [portable IP admission](docs/ru/platform-core.md) and the [repeated synthetic TLS study](docs/ru/traffic-study.md), see the Russian guides. The shared packet core is not an Android or Windows VPN application, and the measured profiles are not DPI detection rates.
 
 For the new independent firewall-policy helper, see [Russian operator guide](docs/ru/netguard.md) and [English operator guide](docs/netguard.md). The test installs and verifies this helper's kernel rules separately from the tunnel process, detects unexpected rule changes, and requires explicit removal. This is **still not a host-wide kill switch**.
 

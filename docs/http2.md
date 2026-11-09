@@ -21,7 +21,7 @@ bash tests/h2-smoke.sh
 
 - A legitimate HTTP/2 session is not necessarily indistinguishable from browser HTTPS. rustls ClientHello, TLS record sizes, SNI, connection durations and stream behavior remain observable.
 - TLS client certificate authentication is unusual for public websites. Any redesign to application-layer device authentication must retain replay prevention, auditable revocation and cryptographic binding.
-- There is not yet a full TUN-over-HTTP/2 mode, an HTTP/3/QUIC datagram transport, mobile app, production host routing or DNS leak policy.
+- An experimental TUN-over-real-HTTP/2 mode now exists in fedup-tun. There is still no HTTP/3/QUIC datagram transport, mobile app, production host routing or DNS leak policy.
 - No claim of stealth, immunity to national DPI, IP/ASN blocking resistance or anonymity is justified by this test.
 - Keep the public listener disabled. Only synthetic 127.0.0.1 data is permitted.
 

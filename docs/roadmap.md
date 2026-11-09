@@ -19,7 +19,7 @@
 - [ ] Per-device identity, short-lived enrollment and revocation. *(certificate fingerprint authorization, live revocation, SSH CLI, offline CSR approval, and local passphrase-encrypted PKCS#8 client keys are implemented; OS keystore, secure CA-key handling and automatic enrollment remain pending)*
 - [ ] Multiplexed TCP streams; explicit UDP semantics. *(one bounded TCP stream per TLS session implemented)*
 - [x] Linux command-line test client and isolated integration test (fixed target, not a full VPN).
-- [ ] Packet capture and network behavior measurement against baselines. *(Synthetic TLS ClientHello and TCP profile measurement is now passing in CI; first report shows no ALPN and a markedly different handshake from curl/OpenSSL HTTP/1.1; representative browser and matched-workload classification validation pending.)*
+- [ ] Packet capture and network behavior measurement against baselines. *(Repeatable three-run-per-mode synthetic PCAP study of raw TLS vs genuine HTTP/2 under an identical IP workload is implemented; a representative Firefox/Chromium HTTPS dataset, held-out classifier validation and real-network behavior are pending.)*
 
 **Additional research:** genuine mTLS HTTP/2 (ALPN h2, real POST/DATA and bounded flow control) now carries the experimental TUN IP traffic through three network namespaces. Raw TLS and HTTP/2 pass matched functional tests; matched browser PCAP datasets and realistic security/performance testing remain pending.
 
@@ -36,7 +36,7 @@
 
 ## Milestone M3: Android client
 
-- [ ] Kotlin `VpnService` bridge to shared Rust core.
+- [ ] Kotlin `VpnService` bridge to shared Rust core. *(The new OS-independent `fedup-core` packet admission is compiled in CI for Android ARM64; there is no Kotlin/VpnService integration yet.)*
 - [ ] Per-app allow-list and explicit kill-switch behavior.
 - [ ] Signed APK, device enrollment QR, background operation and roaming tests.
 - [ ] Clear disclosure that apps may detect VPN state on Android.
@@ -45,7 +45,7 @@
 
 ## Milestone M4: Windows and operational hardening
 
-- [ ] Windows driver and route integration, leak tests, user-friendly installer.
+- [ ] Windows driver and route integration, leak tests, user-friendly installer. *(The OS-independent `fedup-core` is also compile-checked for Windows GNU; there is no Windows driver or client yet.)*
 - [ ] Optional admin UI, backups and rotation/revocation SLAs.
 - [ ] CI release artifacts and security audit.
 
