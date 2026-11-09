@@ -175,9 +175,21 @@ mod tests {
 
     #[test]
     fn round_trip_control_and_data() {
-        for kind in [FrameKind::Ping, FrameKind::Pong, FrameKind::Error,
-                     FrameKind::Open, FrameKind::Data, FrameKind::Close, FrameKind::Datagram] {
-            let stream_id = if matches!(kind, FrameKind::Ping | FrameKind::Pong | FrameKind::Error) {0} else {1};
+        for kind in [
+            FrameKind::Ping,
+            FrameKind::Pong,
+            FrameKind::Error,
+            FrameKind::Open,
+            FrameKind::Data,
+            FrameKind::Close,
+            FrameKind::Datagram,
+        ] {
+            let stream_id = if matches!(kind, FrameKind::Ping | FrameKind::Pong | FrameKind::Error)
+            {
+                0
+            } else {
+                1
+            };
             let original = Frame::new(kind, stream_id, vec![1, 2, 3, 255]).unwrap();
             let mut encoded = Vec::new();
             write_frame(&mut encoded, &original).unwrap();
@@ -207,7 +219,10 @@ mod tests {
     fn refuses_declared_oversize_before_read_or_allocation() {
         for len in [MAX_PAYLOAD_LEN as u32 + 1, u32::MAX] {
             let h = raw_header(WIRE_VERSION, FrameKind::Data as u8, 0, 1, len);
-            assert!(matches!(read_frame(&mut Cursor::new(h)), Err(ProtocolError::Oversize { .. })));
+            assert!(matches!(
+                read_frame(&mut Cursor::new(h)),
+                Err(ProtocolError::Oversize { .. })
+            ));
         }
     }
 
@@ -229,9 +244,21 @@ mod tests {
     #[test]
     fn rejects_invalid_frames_before_writing_anything() {
         let cases = [
-            Frame { kind: FrameKind::Ping, stream_id: 1, payload: vec![] },
-            Frame { kind: FrameKind::Data, stream_id: 0, payload: vec![] },
-            Frame { kind: FrameKind::Data, stream_id: 1, payload: vec![0; MAX_PAYLOAD_LEN + 1] },
+            Frame {
+                kind: FrameKind::Ping,
+                stream_id: 1,
+                payload: vec![],
+            },
+            Frame {
+                kind: FrameKind::Data,
+                stream_id: 0,
+                payload: vec![],
+            },
+            Frame {
+                kind: FrameKind::Data,
+                stream_id: 1,
+                payload: vec![0; MAX_PAYLOAD_LEN + 1],
+            },
         ];
         for f in cases {
             let mut output = vec![];
@@ -248,7 +275,10 @@ mod tests {
         }
         let mut b = h.to_vec();
         b.extend_from_slice(&[1, 2, 3, 4]);
-        assert!(matches!(read_frame(&mut Cursor::new(b)), Err(ProtocolError::Io(_))));
+        assert!(matches!(
+            read_frame(&mut Cursor::new(b)),
+            Err(ProtocolError::Io(_))
+        ));
     }
 
     #[test]
@@ -272,7 +302,10 @@ mod tests {
         let f = Frame::new(FrameKind::Ping, 0, b"hello".to_vec()).unwrap();
         let mut encoded = vec![];
         write_frame(&mut encoded, &f).unwrap();
-        assert_eq!(read_frame(&mut OneByteAtATime(Cursor::new(encoded))).unwrap(), f);
+        assert_eq!(
+            read_frame(&mut OneByteAtATime(Cursor::new(encoded))).unwrap(),
+            f
+        );
     }
 
     #[test]
