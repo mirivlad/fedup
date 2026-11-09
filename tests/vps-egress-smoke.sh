@@ -76,6 +76,8 @@ PY
 PIDS="$PIDS $!"
 for _ in $(seq 1 50); do
   if curl --noproxy '*' -s --max-time 1 \
+    -H 'Content-Type: application/json' \
+    -d "{\"username\":\"phone\",\"password\":\"$PASS\"}" \
     "http://127.0.0.1:$PORT/api/fedup/v1/config" >"$TMP/config"; then
     break
   fi
