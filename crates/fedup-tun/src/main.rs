@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{duplex, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{interval, timeout};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tokio_tun::Tun;
@@ -35,6 +36,8 @@ const MAX_PACKET: usize = LAB_MTU;
 const TUN_BUFFER: usize = 65536;
 const MAX_ALLOWLIST_BYTES: u64 = 65536;
 const STREAM: u32 = 1;
+// A stalled unauthenticated TLS handshake must not monopolize the listener.
+const MAX_PENDING_HANDSHAKES: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ServerMode {
@@ -339,6 +342,7 @@ async fn h2_server_session(
     tun: Arc<Tun>,
     revocation: (DeviceAuthorization, String),
     internet_v4: bool,
+    active_session: Arc<Semaphore>,
 ) -> Result<()> {
     if tls.get_ref().1.alpn_protocol() != Some(b"h2".as_slice()) {
         return Err("ALPN h2 required for HTTP/2 TUN".into());
@@ -372,6 +376,20 @@ async fn h2_server_session(
         )?;
         return Err("HTTP/2 request was not the authorized fixed IP tunnel".into());
     }
+    // Only one peer may read/write the single shared TUN. Authentication
+    // probes can still run concurrently; actual packet sessions cannot.
+    let _active = match active_session.try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            respond.send_response(
+                Response::builder().status(StatusCode::TOO_MANY_REQUESTS).body(())?,
+                true,
+            )?;
+            connection.graceful_shutdown();
+            let _ = timeout(Duration::from_secs(2), connection.accept()).await;
+            return Err("another IP session is already using the TUN".into());
+        }
+    };
     let outgoing = respond.send_response(
         Response::builder()
             .status(StatusCode::OK)
@@ -472,6 +490,8 @@ async fn server_session(
     tun: Arc<Tun>,
     authorization: &DeviceAuthorization,
     mode: ServerMode,
+    active_session: Arc<Semaphore>,
+    handshake_slot: OwnedSemaphorePermit,
 ) -> Result<()> {
     let mut tls = timeout(IO_TIMEOUT, acceptor.accept(socket)).await??;
     let peer = tls
@@ -484,9 +504,15 @@ async fn server_session(
     if !authorized(authorization, &fp)? {
         return Err("device not authorized".into());
     }
+    // Do not keep a scarce handshake slot for a potentially long-lived TUN.
+    drop(handshake_slot);
     if mode.http2() {
-        return h2_server_session(tls, tun, (authorization.clone(), fp), mode.internet_v4()).await;
+        return h2_server_session(
+            tls, tun, (authorization.clone(), fp), mode.internet_v4(), active_session,
+        ).await;
     }
+    let _active = active_session.try_acquire_owned()
+        .map_err(|_| "another IP session is already using the TUN")?;
     let req = read_frame(&mut tls).await?;
     expect_open(req)?;
     open(&mut tls).await?;
@@ -538,8 +564,12 @@ async fn server(
     let acceptor = TlsAcceptor::from(Arc::new(config));
     let tun = create_tun(name)?;
     let listener = TcpListener::bind(listen).await?;
+    // Bound work before authentication; an incomplete ClientHello now stalls
+    // only its own task, not all subsequent incoming TCP connections.
+    let pending_handshakes = Arc::new(Semaphore::new(MAX_PENDING_HANDSHAKES));
+    let active_session = Arc::new(Semaphore::new(1));
     println!(
-        "FedUp {} server listening on {listen}; one device at a time",
+        "FedUp {} server listening on {listen}; one active IP tunnel",
         if mode.internet_v4() {
             "experimental VPS IPv4"
         } else {
@@ -548,11 +578,23 @@ async fn server(
     );
     loop {
         let (socket, _) = listener.accept().await?;
-        if let Err(error) =
-            server_session(socket, acceptor.clone(), tun.clone(), &authorization, mode).await
-        {
-            eprintln!("IP session closed: {error}");
-        }
+        let Ok(slot) = pending_handshakes.clone().try_acquire_owned() else {
+            // Fail closed under unauthenticated load. Do not queue unbounded
+            // TCP connections or allow one slow client to block everyone.
+            drop(socket);
+            continue;
+        };
+        let acceptor = acceptor.clone();
+        let tun = tun.clone();
+        let authorization = authorization.clone();
+        let active_session = active_session.clone();
+        tokio::spawn(async move {
+            if let Err(error) = server_session(
+                socket, acceptor, tun, &authorization, mode, active_session, slot,
+            ).await {
+                eprintln!("IP session closed: {error}");
+            }
+        });
     }
 }
 
