@@ -56,6 +56,8 @@ add table ip $TABLE
 add chain ip $TABLE forward { type filter hook forward priority 0; policy accept; }
 add rule ip $TABLE forward iifname "$TUN" oifname "$WAN" ip saddr 10.77.0.2/32 accept
 add rule ip $TABLE forward iifname "$WAN" oifname "$TUN" ip daddr 10.77.0.2/32 ct state established,related accept
+add rule ip $TABLE forward iifname "$TUN" drop
+add rule ip $TABLE forward oifname "$TUN" drop
 add chain ip $TABLE postrouting { type nat hook postrouting priority 100; policy accept; }
 add rule ip $TABLE postrouting ip saddr 10.77.0.2/32 oifname "$WAN" masquerade
 EOF
