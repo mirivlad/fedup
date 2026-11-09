@@ -41,6 +41,17 @@ jobs:
       - name: Verify encrypted key creation and end-to-end mTLS
         run: bash tests/device-smoke.sh
 
+  auth-accounts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build user management and authentication API
+        run: cargo build -p fedup-users -p fedup-auth
+      - name: Test user add, password rotation, revocation and private loopback API
+        run: bash tests/users-smoke.sh
+
   h2-laboratory:
     runs-on: ubuntu-latest
     timeout-minutes: 15
