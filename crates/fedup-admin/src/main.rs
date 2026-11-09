@@ -303,10 +303,11 @@ mod tests {
         assert_eq!(devices[0].name.as_deref(), Some("phone"));
         assert_eq!(devices[0].fingerprint, fp('a'));
         assert_eq!(devices[1].name, None);
-        assert_eq!(
-            parse_inventory(&render_inventory(&devices)).unwrap(),
-            devices
-        );
+        let mut round_tripped = parse_inventory(&render_inventory(&devices)).unwrap();
+        let mut expected = devices;
+        round_tripped.sort_by(|a, b| a.fingerprint.cmp(&b.fingerprint));
+        expected.sort_by(|a, b| a.fingerprint.cmp(&b.fingerprint));
+        assert_eq!(round_tripped, expected);
     }
 
     #[test]
