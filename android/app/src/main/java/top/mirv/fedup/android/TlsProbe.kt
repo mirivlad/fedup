@@ -86,7 +86,7 @@ internal object TlsProbe {
         ): String? = null
     }
 
-    fun check(identity: EnrollmentManager, endpointText: String): String {
+    fun createClient(identity: EnrollmentManager, endpointText: String, vpn: android.net.VpnService? = null, live: Boolean = false): Pair<OkHttpClient, String> {
         require(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             "Android 10 or later is needed for the TLS 1.3/ALPN diagnostic"
         }
@@ -137,7 +137,7 @@ internal object TlsProbe {
                 return InetAddress.getAllByName(endpoint.hostname).toList()
             }
         }
-        val http = OkHttpClient.Builder()
+        val builder = OkHttpClient.Builder()
             .dns(dns)
             .proxy(Proxy.NO_PROXY)
             .sslSocketFactory(tls.socketFactory, verifier)
@@ -152,21 +152,47 @@ internal object TlsProbe {
             .callTimeout(12, TimeUnit.SECONDS)
             .connectTimeout(6, TimeUnit.SECONDS)
             .readTimeout(8, TimeUnit.SECONDS)
-            .build()
+        if (vpn != null) {
+            // Calls VpnService.protect(socket) before OkHttp connects to the gateway.
+            builder.socketFactory(ProtectedSocketFactory(vpn))
+            // No DNS when full device routes are active: the experimental
+            // protected connection must use an explicitly supplied numeric IPv4.
+            val octets = endpoint.hostname.split(".")
+            require(octets.size == 4 && octets.all {
+                it.isNotEmpty() && it.all(Char::isDigit) &&
+                    it.toIntOrNull() in 0..255
+            }) { "Live lab transport needs numeric IPv4 endpoint, not DNS" }
+        }
+        if (live) {
+            builder.callTimeout(0, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS)
+                .pingInterval(15, TimeUnit.SECONDS)
+        }
+        return Pair(builder.build(), safeUrl.substringBefore("/fedup-lab/"))
+    }
+
+    fun check(identity: EnrollmentManager, endpointText: String): String {
+        val (client, url) = createClient(identity, endpointText)
+        verifyAuthorization(client, url)
+        return "Подтверждены TLS 1.3, HTTP/2, подпись сервера и допуск устройства. " +
+            "VPN-туннель ещё не запущен."
+    }
+
+    fun verifyAuthorization(client: OkHttpClient, baseUrl: String) {
         val request = Request.Builder()
-            .url(safeUrl)
+            .url(baseUrl + "/fedup-lab/v1/auth-check")
             .header("Cache-Control", "no-store")
-            .get()
-            .build()
-        http.newCall(request).execute().use { response ->
+            .get().build()
+        // This request must terminate after 12 seconds even if a long-lived
+        // transport client was supplied.
+        val probe = client.newBuilder().callTimeout(12, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS).build()
+        probe.newCall(request).execute().use { response ->
             require(response.protocol == Protocol.HTTP_2) {
                 "Server did not negotiate actual HTTP/2"
             }
             require(response.code == 204) {
                 "Server did not authorize this device (status " + response.code + ")"
             }
-            return "Подтверждены TLS 1.3, HTTP/2, подпись сервера и допуск устройства. " +
-                "VPN-туннель ещё не запущен."
         }
     }
 }
