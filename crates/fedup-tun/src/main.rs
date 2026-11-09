@@ -592,9 +592,7 @@ async fn main() {
             [_, cmd, addr, device] if cmd == "probe-h2" => {
                 client(addr.parse()?, "", Path::new(device), false, true, true).await
             }
-            [_, cmd, addr, device, flag]
-                if cmd == "probe-h2" && flag == "--passphrase-stdin" =>
-            {
+            [_, cmd, addr, device, flag] if cmd == "probe-h2" && flag == "--passphrase-stdin" => {
                 client(addr.parse()?, "", Path::new(device), true, true, true).await
             }
             _ => {
