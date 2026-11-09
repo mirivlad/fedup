@@ -266,6 +266,8 @@ def main():
             "ClientHello, IP destinations and flow shape can remain observable.",
             "FedUp carries raw application frames over TLS, not real HTTP/2 or HTTP/3.",
             "Reference is curl/OpenSSL HTTP/1.1, not representative browser traffic.",
+            "Lab flow workloads differ; frame counts and durations cannot be directly compared.",
+            "Virtual veth captures may show GSO/GRO artifacts, not exact physical wire frame sizes.",
             "A single controlled capture cannot prove censor detection accuracy.",
             "Never publish personal traffic PCAPs, private endpoints or credentials.",
         ],
