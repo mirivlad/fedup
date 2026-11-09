@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/fedup-protocol", "crates/fedup-lab", "crates/fedup-link", "crates/fedup-admin", "crates/fedup-enroll", "crates/fedup-identity", "crates/fedup-tun", "crates/fedup-h2-lab", "crates/fedup-netguard"]
+members = ["crates/fedup-protocol", "crates/fedup-lab", "crates/fedup-link", "crates/fedup-admin", "crates/fedup-enroll", "crates/fedup-identity", "crates/fedup-tun", "crates/fedup-h2-lab", "crates/fedup-netguard", "crates/fedup-core"]
 resolver = "2"
 
 [workspace.package]
