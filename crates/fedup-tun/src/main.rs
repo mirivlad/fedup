@@ -68,7 +68,10 @@ impl ServerMode {
     }
 
     fn internet_v4(self) -> bool {
-        matches!(self, Self::InternetV4H2 | Self::InternetV4AppProof | Self::InternetV4AppProofH2c)
+        matches!(
+            self,
+            Self::InternetV4H2 | Self::InternetV4AppProof | Self::InternetV4AppProofH2c
+        )
     }
 
     fn app_proof(self) -> bool {
@@ -742,10 +745,12 @@ async fn server(
     } else {
         let tls_builder = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13]);
         let mut config = if mode.app_proof() {
-            tls_builder.with_no_client_auth()
+            tls_builder
+                .with_no_client_auth()
                 .with_single_cert(ca_certs(certificate)?, load_key(key)?)?
         } else {
-            tls_builder.with_client_cert_verifier(verifier.build()?)
+            tls_builder
+                .with_client_cert_verifier(verifier.build()?)
                 .with_single_cert(ca_certs(certificate)?, load_key(key)?)?
         };
         if mode.internet_v4() {
@@ -798,14 +803,12 @@ async fn server(
                 let _established = admission.established.clone().try_acquire_owned();
                 drop(slot);
                 match _established {
-                    Ok(_permit) => {
-                        match admission.app_proof.clone() {
-                            Some(proof) => app_tunnel::serve(
-                                socket, tun, authorization, admission, proof,
-                            ).await,
-                            None => Err("h2c backend without device proof".into()),
+                    Ok(_permit) => match admission.app_proof.clone() {
+                        Some(proof) => {
+                            app_tunnel::serve(socket, tun, authorization, admission, proof).await
                         }
-                    }
+                        None => Err("h2c backend without device proof".into()),
+                    },
                     Err(_) => Err("too many established upstream sessions".into()),
                 }
             };
@@ -946,7 +949,8 @@ async fn main() {
                     Path::new(""),
                     DeviceAuthorization::AccountDatabase(PathBuf::from(users)),
                     ServerMode::InternetV4AppProofH2c,
-                ).await
+                )
+                .await
             }
             [_, cmd, bind, tun, ca, cert, key, users, flag]
                 if cmd == "server-vps-proof-v4"
