@@ -279,7 +279,6 @@ pub fn import_certificate(
         .next()
         .ok_or("client certificate is missing its subject CN")?
         .data()
-        .as_utf8()?
         .to_string();
     if common_name != format!("fedup-{}", metadata.device) {
         return Err("client certificate identity does not match the invitation device".into());
@@ -338,7 +337,7 @@ pub fn device_connection(device_dir: &Path) -> IdentityResult<DeviceConnection> 
 pub fn read_password(confirm: bool, password_stdin: bool) -> IdentityResult<Zeroizing<String>> {
     let first = if password_stdin {
         let mut input = Zeroizing::new(String::new());
-        std::io::stdin().read_line(&mut *input)?;
+        std::io::stdin().read_line(&mut input)?;
         while input.ends_with('\n') || input.ends_with('\r') {
             input.pop();
         }
