@@ -2,7 +2,7 @@
 
 **FedUp** is an early-stage, open-source project for a self-hosted, cross-platform private network tunnel for personal and family use.
 
-> Status: **experimental routed Linux IP tunneling, encrypted device identities and genuine HTTP/2 laboratory transport**. The Rust framing codec, one-shot mTLS lab, fixed-destination TCP forwarder, SSH-first device admin, offline invitation issuer and encrypted Linux device identity are NOT a VPN or production-ready network service. Do not rely on this project for anonymity or security-critical connectivity.
+> Status: **experimental routed Linux IPv4/IPv6 TUN over raw TLS or genuine HTTP/2, with encrypted device identities**. The Rust framing codec, one-shot mTLS lab, fixed-destination TCP forwarder, SSH-first device admin, offline invitation issuer and encrypted Linux device identity are NOT a VPN or production-ready network service. Do not rely on this project for anonymity or security-critical connectivity.
 
 ## Goals
 
@@ -35,7 +35,7 @@
 
 ## Experimental laboratory
 
-The current implementation includes a Linux TUN IP-packet laboratory with a third isolated routed/DNS endpoint (docs/tun.md), a genuine loopback HTTP/2 streaming laboratory (docs/http2.md), alongside a dependency-free Rust framing codec, a one-shot **loopback-only** mTLS 1.3 Ping/Pong lab, and an experimental **single-destination TCP forwarder**. The forwarder requires mutually authenticated TLS, an explicit device certificate allowlist and a fixed operator-configured target. The Linux fedup-admin CLI can initialize, list, add and revoke those allowed certificate fingerprints with atomic file updates. A new fedup-device CLI creates **encrypted client keys and signed CSRs** locally, verifies issued certificates, and fedup-link client-device uses enrollment-pinned server trust. It is not a full VPN, web protocol, or production-ready Internet-facing server.
+The current implementation includes a Linux TUN IP-packet laboratory with a third isolated routed/DNS endpoint (docs/tun.md), a genuine HTTP/2 streaming laboratory, also bridged into the isolated TUN modes server-h2/client-h2 (docs/http2.md), alongside a dependency-free Rust framing codec, a one-shot **loopback-only** mTLS 1.3 Ping/Pong lab, and an experimental **single-destination TCP forwarder**. The forwarder requires mutually authenticated TLS, an explicit device certificate allowlist and a fixed operator-configured target. The Linux fedup-admin CLI can initialize, list, add and revoke those allowed certificate fingerprints with atomic file updates. A new fedup-device CLI creates **encrypted client keys and signed CSRs** locally, verifies issued certificates, and fedup-link client-device uses enrollment-pinned server trust. It is not a full VPN, web protocol, or production-ready Internet-facing server.
 
 On Linux with the Rust toolchain, OpenSSL and Python 3:
 
@@ -48,7 +48,9 @@ bash tests/enroll-smoke.sh
 bash tests/device-smoke.sh
 # Requires root and isolated Linux network namespaces:
 sudo bash tests/tun-smoke.sh
-# Loopback real HTTP/2 + mTLS with encrypted client identity:
+# The same routed IP/DNS tests over genuine HTTP/2:
+sudo env FEDUP_TUN_TRANSPORT=h2 bash tests/tun-smoke.sh
+# Loopback HTTP/2 + mTLS streaming fixture:
 bash tests/h2-smoke.sh
 ```
 

@@ -21,7 +21,7 @@
 - [x] Linux command-line test client and isolated integration test (fixed target, not a full VPN).
 - [ ] Packet capture and network behavior measurement against baselines. *(Synthetic TLS ClientHello and TCP profile measurement is now passing in CI; first report shows no ALPN and a markedly different handshake from curl/OpenSSL HTTP/1.1; representative browser and matched-workload classification validation pending.)*
 
-**Additional research:** genuine mTLS HTTP/2 (ALPN h2 and correctly framed POST/DATA with flow-control) exists in a loopback-only lab; integrating it into TUN and comparing matched browser workloads are pending.
+**Additional research:** genuine mTLS HTTP/2 (ALPN h2, real POST/DATA and bounded flow control) now carries the experimental TUN IP traffic through three network namespaces. Raw TLS and HTTP/2 pass matched functional tests; matched browser PCAP datasets and realistic security/performance testing remain pending.
 
 **Exit:** one authorized client can securely exchange synthetic traffic through a controlled server; tests prove auth, limits and errors. **Not yet an installable consumer VPN.**
 

@@ -2,7 +2,7 @@
 
 The experimental **fedup-h2-lab** is a separate loopback-only application transport prototype using the maintained Rust h2 library, real TLS 1.3 with ALPN h2, correctly framed HTTP/2 SETTINGS/HEADERS/DATA, a fixed POST path and a bounded binary response stream.
 
-This is not a general CONNECT proxy, browser impersonator, production VPN or TUN carriage yet.
+This is not a general CONNECT proxy, browser impersonator or production VPN. The HTTP/2 byte-stream adapter has now also been integrated into fedup-tun for an isolated IP-packet test.
 
 ## Architecture and controls
 
@@ -26,3 +26,18 @@ bash tests/h2-smoke.sh
 - Keep the public listener disabled. Only synthetic 127.0.0.1 data is permitted.
 
 Technical standards: RFC 9113, RFC 9297, RFC 9298.
+
+## Routed IPv4/IPv6 over HTTP/2
+
+The experimental fedup-tun binary now supports server-h2 and client-h2, alongside its original raw mTLS modes. These use a genuine HTTP/2 POST at /fedup-lab/v1/ip-tunnel and bridge the FedUp Datagram byte-stream through bounded HTTP/2 DATA streams, backpressure and flow control.
+
+Run the full disposable network namespace integration with:
+
+~~~sh
+cargo build -p fedup-tun -p fedup-enroll -p fedup-identity -p fedup-admin
+sudo env FEDUP_TUN_TRANSPORT=h2 bash tests/tun-smoke.sh
+~~~
+
+The test verifies routed IPv4/IPv6 ICMP, TCP/HTTP, UDP and synthetic DNS through three namespaces; active certificate revocation breaks the routed connection. The GitHub Actions run 42570359233 passed and confirmed ALPN h2 in the passive ClientHello capture. The raw mode remains the baseline and does not advertise ALPN.
+
+This is not a general-purpose VPN. The server accepts only the lab's exact synthetic routed host, and no host default route or firewall is changed.

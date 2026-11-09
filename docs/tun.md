@@ -48,4 +48,4 @@ The applications exercised **different workloads**. TCP frame counts, flow durat
 
 The next experiment must use matched workloads, larger samples, negative tests and a real standards-compliant application protocol rather than false HTTP ALPN labels.
 
-A separate [standards-compliant HTTP/2 application lab](http2.md) now exists, but its DATA streams are **not** connected to the TUN IP tunnel yet. That integration needs its own security, performance and backpressure tests.
+A separate [standards-compliant HTTP/2 application lab](http2.md) is now integrated into fedup-tun in experimental server-h2/client-h2 mode. The same three-namespace IP/DNS/revocation tests pass on real HTTP/2 DATA streams, and CI asserts ALPN h2. Production hardening, performance, multi-device scaling and DPI behavior remain unverified.
