@@ -18,6 +18,7 @@ import android.os.Build
 class FedUpVpnService : VpnService() {
     companion object {
         const val START = "top.mirv.fedup.android.START_LAB"
+        const val START_VPS_V4 = "top.mirv.fedup.android.START_VPS_IPV4"
         const val STOP = "top.mirv.fedup.android.STOP_LAB"
         const val ENDPOINT = "fedup.endpoint"
         private const val NOTIFICATION_ID = 42
@@ -33,7 +34,8 @@ class FedUpVpnService : VpnService() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (intent?.action != START || session != null) {
+        if ((intent?.action != START && intent?.action != START_VPS_V4)
+            || session != null) {
             if (session == null) stopSelf(startId)
             return START_NOT_STICKY
         }
@@ -49,14 +51,17 @@ class FedUpVpnService : VpnService() {
         }
         try {
             TlsProbe.Endpoint.parse(endpoint)
-            showNotification(false)
+            showNotification(false, intent.action == START_VPS_V4)
         } catch (_: Exception) {
             stopSelf(startId)
             return START_NOT_STICKY
         }
 
-        val newSession = LabTunnelSession(this, EnrollmentManager(this), endpoint) {
-            showNotification(true)
+        val internetV4 = intent.action == START_VPS_V4
+        val newSession = LabTunnelSession(
+            this, EnrollmentManager(this), endpoint, internetV4
+        ) {
+            showNotification(true, internetV4)
         }
         session = newSession
         Thread({
@@ -75,7 +80,7 @@ class FedUpVpnService : VpnService() {
         return START_NOT_STICKY
     }
 
-    private fun showNotification(connected: Boolean) {
+    private fun showNotification(connected: Boolean, internetV4: Boolean) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, "FedUp laboratory", NotificationManager.IMPORTANCE_LOW)
@@ -86,9 +91,12 @@ class FedUpVpnService : VpnService() {
         )
         val notification = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_warning)
-            .setContentTitle(if (connected) "FedUp LAB — тестовый IP-туннель"
-                else "FedUp LAB — проверка соединения")
-            .setContentText("Интернет и DNS НЕ защищены. Только тестовые IP.")
+            .setContentTitle(if (connected)
+                if (internetV4) "FedUp VPS — IPv4 эксперимент" else "FedUp LAB — тестовый туннель"
+                else "FedUp — проверка TLS и допуска")
+            .setContentText(if (internetV4)
+                "IPv4 и DNS в туннеле; IPv6 заблокирован. Нет полной гарантии от утечек."
+                else "Интернет и DNS НЕ защищены. Только тестовые IP.")
             .setOngoing(true)
             .addAction(Notification.Action.Builder(
                 android.R.drawable.ic_menu_close_clear_cancel, "Отключить", stop
