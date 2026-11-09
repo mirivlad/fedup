@@ -37,6 +37,13 @@ pub struct IssuedDevice {
     pub expires_at: i64,
 }
 
+#[derive(Serialize)]
+pub struct PublicConfig {
+    pub server_name: String,
+    pub ca_pem: String,
+    pub ca_sha256: String,
+}
+
 fn one_certificate(pem: &str) -> Result<Vec<u8>> {
     let all = certs(&mut BufReader::new(pem.as_bytes())).collect::<std::io::Result<Vec<_>>>()?;
     if all.len() != 1 {
@@ -77,6 +84,14 @@ impl LabIssuer {
             ca_sha256,
             server_name: server_name.to_string(),
         })
+    }
+
+    pub fn public_config(&self) -> PublicConfig {
+        PublicConfig {
+            server_name: self.server_name.clone(),
+            ca_pem: self.ca_pem.clone(),
+            ca_sha256: self.ca_sha256.clone(),
+        }
     }
 
     pub fn issue(&self, csr_pem: &str, device: &str) -> Result<IssuedDevice> {
