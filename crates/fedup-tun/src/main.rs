@@ -38,6 +38,9 @@ const MAX_ALLOWLIST_BYTES: u64 = 65536;
 const STREAM: u32 = 1;
 // A stalled unauthenticated TLS handshake must not monopolize the listener.
 const MAX_PENDING_HANDSHAKES: usize = 16;
+// Includes anonymous HTTPS clients and authenticated HTTP/2 probes.
+// Every established TLS connection holds a slot until it closes.
+const MAX_ESTABLISHED_SESSIONS: usize = 32;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ServerMode {
@@ -581,9 +584,17 @@ async fn server_session(
     authorization: &DeviceAuthorization,
     mode: ServerMode,
     active_session: Arc<Semaphore>,
+    established_sessions: Arc<Semaphore>,
     handshake_slot: OwnedSemaphorePermit,
 ) -> Result<()> {
     let mut tls = timeout(IO_TIMEOUT, acceptor.accept(socket)).await??;
+    // A completed TLS handshake must never bypass capacity limits. Without
+    // this gate, an uncredentialed client could hold arbitrarily many public
+    // HTTP/2 sessions and exhaust memory after the handshake limiter released.
+    let _established_slot = established_sessions
+        .try_acquire_owned()
+        .map_err(|_| "too many established TLS sessions")?;
+    drop(handshake_slot);
     let peer = tls
         .get_ref()
         .1
@@ -593,7 +604,6 @@ async fn server_session(
         if mode.internet_v4() {
             // Anonymous browser clients must NEVER reach device
             // authorization, HTTP/2 tunnel handlers or the TUN.
-            drop(handshake_slot);
             return public_https_session(tls).await;
         }
         return Err("missing mTLS device certificate".into());
@@ -602,8 +612,6 @@ async fn server_session(
     if !authorized(authorization, &fp)? {
         return Err("device not authorized".into());
     }
-    // Do not keep a scarce handshake slot for a potentially long-lived TUN.
-    drop(handshake_slot);
     if mode.http2() {
         return h2_server_session(
             tls,
@@ -681,6 +689,7 @@ async fn server(
     // Bound work before authentication; an incomplete ClientHello now stalls
     // only its own task, not all subsequent incoming TCP connections.
     let pending_handshakes = Arc::new(Semaphore::new(MAX_PENDING_HANDSHAKES));
+    let established_sessions = Arc::new(Semaphore::new(MAX_ESTABLISHED_SESSIONS));
     let active_session = Arc::new(Semaphore::new(1));
     println!(
         "FedUp {} server listening on {listen}; one active IP tunnel",
@@ -702,6 +711,7 @@ async fn server(
         let tun = tun.clone();
         let authorization = authorization.clone();
         let active_session = active_session.clone();
+        let established_sessions = established_sessions.clone();
         tokio::spawn(async move {
             if let Err(error) = server_session(
                 socket,
@@ -710,6 +720,7 @@ async fn server(
                 &authorization,
                 mode,
                 active_session,
+                established_sessions,
                 slot,
             )
             .await
