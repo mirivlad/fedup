@@ -86,10 +86,7 @@ async fn read_frame_async<R: AsyncRead + Unpin>(reader: &mut R) -> LinkResult<Fr
     Ok(Frame::new(header.kind, header.stream_id, payload)?)
 }
 
-async fn send_frame_async<W: AsyncWrite + Unpin>(
-    writer: &mut W,
-    frame: &Frame,
-) -> LinkResult<()> {
+async fn send_frame_async<W: AsyncWrite + Unpin>(writer: &mut W, frame: &Frame) -> LinkResult<()> {
     let header = encode_header(frame)?;
     timeout(CONNECT_TIMEOUT, writer.write_all(&header)).await??;
     timeout(CONNECT_TIMEOUT, writer.write_all(&frame.payload)).await??;
@@ -97,10 +94,7 @@ async fn send_frame_async<W: AsyncWrite + Unpin>(
     Ok(())
 }
 
-async fn send_kind<W: AsyncWrite + Unpin>(
-    writer: &mut W,
-    kind: FrameKind,
-) -> LinkResult<()> {
+async fn send_kind<W: AsyncWrite + Unpin>(writer: &mut W, kind: FrameKind) -> LinkResult<()> {
     send_frame_async(writer, &Frame::new(kind, STREAM_ID, Vec::new())?).await
 }
 
@@ -218,8 +212,8 @@ async fn server(
     }
     // Fail closed on malformed/missing authorizations before opening the port.
     let _ = authorized(&allowlist, "")?;
-    let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(trust_roots(ca)?))
-        .build()?;
+    let verifier =
+        rustls::server::WebPkiClientVerifier::builder(Arc::new(trust_roots(ca)?)).build()?;
     let config = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
         .with_client_cert_verifier(verifier)
         .with_single_cert(certs(cert)?, private_key(key)?)?;
@@ -318,9 +312,7 @@ async fn main() {
                 println!("{}", fingerprint(certs(Path::new(cert))?[0].as_ref()));
                 Ok(())
             }
-            [_, action, listen, target, ca, cert, key, allowlist]
-                if action == "server" =>
-            {
+            [_, action, listen, target, ca, cert, key, allowlist] if action == "server" => {
                 server(
                     listen.parse()?,
                     target.parse()?,
@@ -346,9 +338,7 @@ async fn main() {
                 )
                 .await
             }
-            [_, action, bind, server_addr, hostname, ca, cert, key]
-                if action == "client" =>
-            {
+            [_, action, bind, server_addr, hostname, ca, cert, key] if action == "client" => {
                 client(
                     bind.parse()?,
                     server_addr.parse()?,
