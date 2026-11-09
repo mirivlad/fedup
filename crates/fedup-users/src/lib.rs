@@ -341,7 +341,9 @@ pub fn register_signed_device(dir: &Path, device: SignedDevice<'_>) -> Result<(S
             && saved.expires_at > unix_seconds()?
             && saved.csr_sha256.as_deref() == Some(csr_sha256)
         {
-            let cert = saved.certificate_pem.ok_or("missing certificate on safe retry")?;
+            let cert = saved
+                .certificate_pem
+                .ok_or("missing certificate on safe retry")?;
             tx.commit()?;
             return Ok((cert, saved.fingerprint));
         }
