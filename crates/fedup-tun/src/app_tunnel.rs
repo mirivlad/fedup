@@ -4,6 +4,41 @@
 use super::*;
 use http::header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, SET_COOKIE};
 
+// Ordinary web requests must remain servable while a long-lived upstream
+// HTTP/2 VPN stream is active: Caddy can multiplex separate browser clients
+// onto the SAME loopback h2c connection. Do not expose device authorization.
+fn send_public_page(
+    request: &Request<RecvStream>,
+    mut respond: h2::server::SendResponse<Bytes>,
+    state: &proof::DeviceProof,
+) -> Result<()> {
+    let (status, content_type, body) =
+        public_page(request.method().as_str(), request.uri().path());
+    let mut response = Response::builder()
+        .status(status)
+        .header(CONTENT_TYPE, content_type)
+        .header(CONTENT_LENGTH, body.len().to_string())
+        .header(CACHE_CONTROL, "no-store");
+    if status == StatusCode::OK {
+        // On nonce exhaustion continue serving web pages instead of crashing
+        // the authorized packet stream. Proof issuance fails closed.
+        if let Ok(nonce) = state.issue() {
+            response = response.header(
+                SET_COOKIE,
+                format!("visitor_session={nonce}; Path=/; Secure; HttpOnly; SameSite=Strict"),
+            );
+        }
+    }
+    let mut outgoing = respond.send_response(response.body(())?, false)?;
+    let payload = if request.method() == http::Method::HEAD {
+        Bytes::new()
+    } else {
+        Bytes::from_static(body)
+    };
+    outgoing.send_data(payload, true)?;
+    Ok(())
+}
+
 pub(super) async fn serve<T>(
     tls: T,
     tun: Arc<Tun>,
@@ -95,13 +130,22 @@ where
             )?;
             let (tun_end, bridge_end) = duplex(64 * 1024);
             let bridge = tokio::spawn(h2_bridge(request.into_body(), outgoing, bridge_end));
+            let browser_sessions = state.clone();
             let driver = tokio::spawn(async move {
                 while let Some(next) = connection.accept().await {
-                    let (_, mut respond) = next?;
-                    respond.send_response(
-                        Response::builder().status(StatusCode::NOT_FOUND).body(())?,
-                        true,
-                    )?;
+                    let (request, mut respond) = next?;
+                    if matches!(request.method(), &http::Method::GET | &http::Method::HEAD)
+                        && matches!(request.uri().path(), "/" | "/index.html")
+                    {
+                        send_public_page(&request, respond, &browser_sessions)?;
+                    } else {
+                        // A second authenticated TUN must not share the
+                        // single-device packet stream. Respond uniformly 404.
+                        respond.send_response(
+                            Response::builder().status(StatusCode::NOT_FOUND).body(())?,
+                            true,
+                        )?;
+                    }
                 }
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
             });
@@ -111,28 +155,7 @@ where
             return result;
         }
 
-        // Issue an opaque, short-lived web session cookie on GET /.
-        // No public endpoint identifies itself as a VPN challenge API.
-        let (status, content_type, body) = public_page(method, path);
-        let mut response = Response::builder()
-            .status(status)
-            .header(CONTENT_TYPE, content_type)
-            .header(CONTENT_LENGTH, body.len().to_string())
-            .header(CACHE_CONTROL, "no-store");
-        if status == StatusCode::OK {
-            let nonce = state.issue()?;
-            response = response.header(
-                SET_COOKIE,
-                format!("visitor_session={nonce}; Path=/; Secure; HttpOnly; SameSite=Strict"),
-            );
-        }
-        let mut outgoing = respond.send_response(response.body(())?, false)?;
-        let body = if method == "HEAD" {
-            Bytes::new()
-        } else {
-            Bytes::from_static(body)
-        };
-        outgoing.send_data(body, true)?;
+        send_public_page(&request, respond, &state)?;
     }
     connection.graceful_shutdown();
     let _ = timeout(Duration::from_secs(2), connection.accept()).await;

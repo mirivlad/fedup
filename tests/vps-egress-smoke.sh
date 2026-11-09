@@ -320,6 +320,15 @@ if timeout 6 ip netns exec "$CN" curl -kfsS --noproxy '*' \
 fi
 timeout 6 ip netns exec "$CN" ping -n -c 1 -W 2 9.9.9.9 >/dev/null
 echo "Active anonymous probe denied; authenticated tunnel still routes packets: PASS"
+# A second ordinary HTTPS visitor must still see a public page WHILE
+# the first device maintains its long-lived HTTP/2 TUN. With Caddy h2c
+# different client requests can be multiplexed on one backend connection.
+if ! timeout 6 ip netns exec "$CN" curl -kfsS --noproxy '*' --http2 \
+  "https://172.31.44.1:7443/" | grep -q "Service is online"; then
+  echo "FAIL: public website became unavailable during active IP tunnel" >&2
+  exit 1
+fi
+echo "Public HTTPS still responds during authorized long-lived IP tunnel: PASS"
 # Refuse a second simultaneous packet session until a real per-device
 # address allocator and TUN demultiplexer exist. The second connection can
 # authenticate, but must NOT see first device traffic or create another TUN.
