@@ -1,12 +1,12 @@
 # FedUp — isolated Linux IP tunnel and observability
 
-fedup-tun is an experimental Linux TUN-based IPv4/IPv6 transport over mutually authenticated TLS 1.3. It forwards real L3 packets using the FedUp Datagram frame type, with a **fixed two-endpoint lab allowlist**. It is NOT an Internet VPN, general proxy, browser-like HTTPS connection, or production system.
+fedup-tun is an experimental Linux TUN-based IPv4/IPv6 transport over mutually authenticated TLS 1.3. It forwards real L3 packets using the FedUp Datagram frame type, with a **fixed three-node lab allowlist (client, VPN server and one synthetic remote host)**. It is NOT an Internet VPN, general proxy, browser-like HTTPS connection, or production system.
 
 ## Controlled test
 
-The script tests/tun-smoke.sh creates two temporary Linux network namespaces and a veth link. The outer test network uses 172.31.44.0/30; the inner fixed peer addresses are 10.77.0.1/30 and 10.77.0.2/30, and fd42:fed0::1/64 and fd42:fed0::2/64. MTU is 1280. No host routing, DNS, or firewall is changed.
+The script tests/tun-smoke.sh creates three temporary Linux network namespaces: client, VPN server and a routed synthetic remote host. The outer test network uses 172.31.44.0/30; the inner fixed peer addresses are 10.77.0.1/30 and 10.77.0.2/30, and fd42:fed0::1/64 and fd42:fed0::2/64. MTU is 1280. No host routing, DNS, or firewall is changed.
 
-Validated functionality: IPv4 and IPv6 ICMP, HTTP over tunneled TCP, UDP datagrams, certificate revocation and absence of an external route **inside the namespace only**. There is no NAT, DNS management, route default policy, Internet access, auto-reconnect or production kill switch.
+Validated functionality: IPv4 and IPv6 ICMP, HTTP over tunneled TCP, UDP datagrams, **routed** IPv4/IPv6 ICMP and TCP/HTTP to 10.88.0.10 / fd42:fed1::10, synthetic DNS over UDP/53, refusal of other destination hosts, certificate revocation and absence of an external route **inside the namespace only**. There is no NAT, DNS management, route default policy, Internet access, auto-reconnect or production kill switch.
 
 ~~~sh
 cargo build -p fedup-tun -p fedup-identity -p fedup-enroll -p fedup-admin
@@ -23,7 +23,7 @@ The network observer can still see the destination IP, handshake metadata and tr
 
 ## Limitations
 
-- Packet addresses and maximum length are deliberately restricted to two isolated peers.
+- Packet addresses and maximum length are deliberately restricted to client/server and one exact synthetic remote host.
 - No Internet egress, NAT or actual split/full tunnel; no production deployment.
 - Only one active client at a time in this proof of concept.
 - No robust routing/DNS leak policy, service install or system privileges isolation.
@@ -47,3 +47,5 @@ The synthetic capture (GitHub Actions run 42563767605) extracted one FedUp and o
 The applications exercised **different workloads**. TCP frame counts, flow duration and timing are therefore not controlled comparisons. The ClientHello and ALPN differences are observable and reproducible; they do NOT prove that any particular censorship system classifies the protocol.
 
 The next experiment must use matched workloads, larger samples, negative tests and a real standards-compliant application protocol rather than false HTTP ALPN labels.
+
+A separate [standards-compliant HTTP/2 application lab](http2.md) now exists, but its DATA streams are **not** connected to the TUN IP tunnel yet. That integration needs its own security, performance and backpressure tests.

@@ -21,11 +21,13 @@
 - [x] Linux command-line test client and isolated integration test (fixed target, not a full VPN).
 - [ ] Packet capture and network behavior measurement against baselines. *(Synthetic TLS ClientHello and TCP profile measurement is now passing in CI; first report shows no ALPN and a markedly different handshake from curl/OpenSSL HTTP/1.1; representative browser and matched-workload classification validation pending.)*
 
+**Additional research:** genuine mTLS HTTP/2 (ALPN h2 and correctly framed POST/DATA with flow-control) exists in a loopback-only lab; integrating it into TUN and comparing matched browser workloads are pending.
+
 **Exit:** one authorized client can securely exchange synthetic traffic through a controlled server; tests prove auth, limits and errors. **Not yet an installable consumer VPN.**
 
 ## Milestone M2: Linux operational system
 
-- [ ] TUN integration and route/DNS handling for IPv4 and IPv6. *(Experimental fixed-peer Linux TUN passes IPv4/IPv6 ICMP, TCP and UDP tests in isolated namespaces; real routing/DNS/policy pending.)*
+- [ ] TUN integration and route/DNS handling for IPv4 and IPv6. *(Experimental Linux TUN now routes IPv4, IPv6, TCP, UDP and synthetic DNS to one exact allowed remote address in a **third isolated namespace**, with tested revocation; host routing, real NAT, automatic DNS policy and production leak controls remain pending.)*
 - [ ] Protection policy and network-failure leak tests.
 - [ ] Systemd service, DEB and straightforward SSH admin. *(experimental SSH CLI is implemented; packaging, roles and managed enrollment pending)*
 - [ ] Stable config with documented backups and upgrades.
