@@ -71,7 +71,7 @@ jobs:
 
   tun-namespace:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -122,3 +122,33 @@ jobs:
         run: sudo env FEDUP_TUN_TRANSPORT=raw FEDUP_TUN_FAULT=1 bash tests/tun-smoke.sh
       - name: Fault injection - direct-route kill switch and lossy HTTP/2
         run: sudo env FEDUP_TUN_TRANSPORT=h2 FEDUP_TUN_FAULT=1 bash tests/tun-smoke.sh
+      - name: Test repeatable traffic study aggregator
+        run: python3 tools/test-traffic-study.py
+      - name: Repeated matched synthetic traffic comparison
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fedup-study"
+          for mode in raw h2; do
+            for iteration in 1 2 3; do
+              prefix="$RUNNER_TEMP/fedup-study/$mode-$iteration"
+              if ! sudo env FEDUP_TUN_TRANSPORT="$mode" FEDUP_CAPTURE_PCAP="$prefix.pcap"                 bash tests/tun-smoke.sh >"$prefix.log" 2>&1; then
+                cat "$prefix.log"
+                exit 1
+              fi
+              sudo chown "$(id -u):$(id -g)" "$prefix.pcap"
+              python3 tools/traffic-profile.py "$prefix.pcap" --output "$prefix.json"
+              echo "Captured matched workload $mode/$iteration"
+            done
+          done
+          python3 tools/traffic-study.py             --raw "$RUNNER_TEMP"/fedup-study/raw-*.json             --h2 "$RUNNER_TEMP"/fedup-study/h2-*.json             --output "$RUNNER_TEMP/fedup-study/study.json"
+          cat "$RUNNER_TEMP/fedup-study/study.json"
+          python3 - "$RUNNER_TEMP/fedup-study/study.json" <<'PY'
+          import json,sys
+          results=json.load(open(sys.argv[1]))
+          assert results["raw_tls"]["independent_captures"] == 3
+          assert results["real_http2"]["independent_captures"] == 3
+          assert results["raw_tls"]["offered_alpn"] == []
+          assert results["real_http2"]["offered_alpn"] == ["h2"]
+          assert "detection_rate" not in results
+          print("Repeated controlled raw/h2 TLS characterization: PASS; no DPI rate inferred")
+          PY
