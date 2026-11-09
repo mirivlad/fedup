@@ -326,9 +326,7 @@ fn run() -> Result<()> {
             println!("{}", policy.install_batch());
             Ok(())
         }
-        [_, action, path]
-            if action == "install" || action == "ensure" || action == "verify" =>
-        {
+        [_, action, path] if action == "install" || action == "ensure" || action == "verify" => {
             isolated()?;
             let policy = load(Path::new(path))?;
             match action.as_str() {
