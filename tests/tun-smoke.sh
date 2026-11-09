@@ -5,13 +5,14 @@ cd "$(dirname "$0")/.."
 [[ "$(id -u)" == 0 ]] || { echo "Use sudo bash tests/tun-smoke.sh" >&2; exit 2; }
 for cmd in ip ping openssl python3 curl timeout; do command -v "$cmd" >/dev/null || { echo "Missing $cmd" >&2; exit 2; }; done
 [[ -c /dev/net/tun ]] || { echo "No /dev/net/tun" >&2; exit 2; }
-for binary in fedup-tun fedup-enroll fedup-device fedup-admin; do
+for binary in fedup-tun fedup-enroll fedup-device fedup-admin fedup-netguard; do
   [[ -x "target/debug/$binary" ]] || { echo "Build $binary first" >&2; exit 2; }
 done
 TUN="$PWD/target/debug/fedup-tun"
 ENROLL="$PWD/target/debug/fedup-enroll"
 DEVICE="$PWD/target/debug/fedup-device"
 ADMIN="$PWD/target/debug/fedup-admin"
+NETGUARD="$PWD/target/debug/fedup-netguard"
 MODE="${FEDUP_TUN_TRANSPORT:-raw}"
 FAULT_MODE="${FEDUP_TUN_FAULT:-0}"
 [[ "$FAULT_MODE" == 0 || "$FAULT_MODE" == 1 ]] || { echo "FEDUP_TUN_FAULT must be 0 or 1" >&2; exit 2; }
@@ -118,16 +119,23 @@ if [[ "$FAULT_MODE" == 1 ]]; then
     exit 1
   fi
   echo "Synthetic direct IPv6 bypass: CONFIRMED"
-  # nftables applies only to the isolated CLIENT namespace.
-  ip netns exec "$CN" nft -f - <<'NFT'
-table inet fedup_lab {
-  chain output {
-    type filter hook output priority -50; policy accept;
-    ip daddr 10.88.0.10 oifname != "futclient" counter drop
-    ip6 daddr fd42:fed1::10 oifname != "futclient" counter drop
-  }
+  # Install an independent, atomically applied policy with a root-only helper.
+  # The policy exists before the VPN's TUN is created, and survives its crash.
+  cat >"$TMP/netguard.json" <<'JSON'
+{
+  "version": 1,
+  "tun": "futclient",
+  "protected_ipv4": ["10.88.0.10"],
+  "protected_ipv6": ["fd42:fed1::10"],
+  "block_plain_dns": true
 }
-NFT
+JSON
+  chmod 0600 "$TMP/netguard.json"
+  ip netns exec "$CN" "$NETGUARD" install "$TMP/netguard.json"
+  ip netns exec "$CN" "$NETGUARD" verify "$TMP/netguard.json"
+  if ip netns exec "$CN" "$NETGUARD" install "$TMP/netguard.json" >"$TMP/reinstall.log" 2>&1; then
+    echo "FAIL: netguard unexpectedly overwrote an existing table" >&2; exit 1
+  fi
   if timeout 4 ip netns exec "$CN" ping -n -c 1 -W 1 10.88.0.10 >/dev/null 2>&1; then
     echo "FAIL: protected IPv4 leaked to direct bypass" >&2; exit 1
   fi
@@ -402,10 +410,21 @@ if [[ "$FAULT_MODE" == 1 ]]; then
   if timeout 4 ip netns exec "$CN" ping -6 -n -c 1 -W 1 fd42:fed1::10 >/dev/null 2>&1; then
     echo "FAIL: protected IPv6 leaked when TUN crashed" >&2; exit 1
   fi
-  ip netns exec "$CN" nft list chain inet fedup_lab output >"$TMP/nft-counters.txt"
+  ip netns exec "$CN" "$NETGUARD" verify "$TMP/netguard.json"
+  ip netns exec "$CN" nft list chain inet fedup_lab_guard output >"$TMP/nft-counters.txt"
   grep -q "counter packets" "$TMP/nft-counters.txt" || {
     echo "FAIL: nftables output counters unavailable" >&2; exit 1;
   }
   echo "Crash with available direct bypass: nftables blocks IPv4 and IPv6 leaks: PASS"
+  # Policy is independent of the now-dead VPN process. Removing it requires
+  # an explicit operator-only action, and must never happen on process exit.
+  ip netns exec "$CN" "$NETGUARD" verify "$TMP/netguard.json"
+  ip netns exec "$CN" "$NETGUARD" remove "$TMP/netguard.json" --confirm-lab-remove
+  if ip netns exec "$CN" "$NETGUARD" verify "$TMP/netguard.json" >/dev/null 2>&1; then
+    echo "FAIL: netguard policy survived its explicit removal" >&2; exit 1
+  fi
+  timeout 12 ip netns exec "$CN" ping -n -c 2 -W 2 10.88.0.10 >/dev/null
+  timeout 12 ip netns exec "$CN" ping -6 -n -c 2 -W 2 fd42:fed1::10 >/dev/null
+  echo "Explicit laboratory unguard restores deliberately direct IPv4/IPv6 path: PASS"
 fi
 echo "FedUp Linux TUN namespace lab ($MODE): PASS"
