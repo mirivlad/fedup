@@ -173,7 +173,8 @@ fn without_counters(line: &str) -> Result<String> {
     let mut out = Vec::new();
     let mut index = 0;
     while index < parts.len() {
-        if parts[index] == "counter" && index + 4 < parts.len()
+        if parts[index] == "counter"
+            && index + 4 < parts.len()
             && parts[index + 1] == "packets"
             && parts[index + 3] == "bytes"
             && parts[index + 2].parse::<u64>().is_ok()
@@ -393,7 +394,10 @@ mod tests {
             }
         }"#;
         assert!(inspect(text, &policy()).is_ok());
-        let altered = text.replace("counter packets 5 bytes 720 drop", "counter packets 5 bytes 720 accept");
+        let altered = text.replace(
+            "counter packets 5 bytes 720 drop",
+            "counter packets 5 bytes 720 accept",
+        );
         assert!(inspect(&altered, &policy()).is_err());
         let altered = text.replace("10.88.0.10", "10.88.0.11");
         assert!(inspect(&altered, &policy()).is_err());
