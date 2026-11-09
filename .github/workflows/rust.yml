@@ -67,7 +67,7 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iproute2 iputils-ping libssl-dev pkg-config curl tcpdump nftables
       - name: Build experimental TUN, enrollment and administration
-        run: cargo build -p fedup-tun -p fedup-identity -p fedup-enroll -p fedup-admin
+        run: cargo build -p fedup-tun -p fedup-identity -p fedup-enroll -p fedup-admin -p fedup-netguard
       - name: Verify isolated namespaces and parse synthetic TLS ClientHello
         run: |
           mkdir -p "$RUNNER_TEMP/fedup-profile"
