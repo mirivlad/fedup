@@ -60,7 +60,9 @@ fn parse_inventory(content: &str) -> AdminResult<Vec<Device>> {
             continue;
         }
         if !valid_fingerprint(line) {
-            return Err(format!("line {}: invalid certificate fingerprint", line_number + 1).into());
+            return Err(
+                format!("line {}: invalid certificate fingerprint", line_number + 1).into(),
+            );
         }
         if devices.len() >= MAX_DEVICES {
             return Err("too many authorized devices".into());
@@ -88,7 +90,9 @@ fn parse_inventory(content: &str) -> AdminResult<Vec<Device>> {
 fn render_inventory(devices: &[Device]) -> String {
     let mut entries = devices.to_vec();
     entries.sort_by(|a, b| {
-        a.name.as_deref().unwrap_or("")
+        a.name
+            .as_deref()
+            .unwrap_or("")
             .cmp(b.name.as_deref().unwrap_or(""))
             .then(a.fingerprint.cmp(&b.fingerprint))
     });
@@ -116,7 +120,9 @@ fn read_inventory(path: &Path) -> AdminResult<Vec<Device>> {
 }
 
 fn exclusive_lock(path: &Path) -> AdminResult<File> {
-    let name = path.file_name().ok_or("authorization path has no file name")?;
+    let name = path
+        .file_name()
+        .ok_or("authorization path has no file name")?;
     let lock_name = format!("{}.lock", name.to_string_lossy());
     let lock_path = path.with_file_name(lock_name);
     if let Ok(metadata) = fs::symlink_metadata(&lock_path) {
@@ -135,9 +141,12 @@ fn exclusive_lock(path: &Path) -> AdminResult<File> {
 }
 
 fn atomic_replace(path: &Path, devices: &[Device]) -> AdminResult<()> {
-    let dir = path.parent().ok_or("authorization file needs a parent directory")?;
+    let dir = path
+        .parent()
+        .ok_or("authorization file needs a parent directory")?;
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
-    tmp.as_file().set_permissions(fs::Permissions::from_mode(0o600))?;
+    tmp.as_file()
+        .set_permissions(fs::Permissions::from_mode(0o600))?;
     tmp.write_all(render_inventory(devices).as_bytes())?;
     tmp.as_file().sync_all()?;
     tmp.persist(path)?;
@@ -154,7 +163,9 @@ fn initialize(path: &Path) -> AdminResult<()> {
         .open(path)?;
     file.write_all(render_inventory(&[]).as_bytes())?;
     file.sync_all()?;
-    let dir = path.parent().ok_or("authorization file needs a parent directory")?;
+    let dir = path
+        .parent()
+        .ok_or("authorization file needs a parent directory")?;
     File::open(dir)?.sync_all()?;
     Ok(())
 }
@@ -174,7 +185,9 @@ where
 
 fn add_device(path: &Path, name: &str, fp: &str) -> AdminResult<()> {
     if !valid_name(name) {
-        return Err("device name must be 1-48 ASCII letters, digits, dots, hyphens or underscores".into());
+        return Err(
+            "device name must be 1-48 ASCII letters, digits, dots, hyphens or underscores".into(),
+        );
     }
     if !valid_fingerprint(fp) {
         return Err("invalid certificate fingerprint".into());
@@ -200,8 +213,7 @@ fn revoke_device(path: &Path, selector: &str) -> AdminResult<()> {
         let before = devices.len();
         devices.retain(|d| {
             d.name.as_deref() != Some(selector)
-                && !(valid_fingerprint(selector)
-                    && d.fingerprint.eq_ignore_ascii_case(selector))
+                && !(valid_fingerprint(selector) && d.fingerprint.eq_ignore_ascii_case(selector))
         });
         if devices.len() == before {
             return Err("device not found; no changes written".into());
@@ -241,7 +253,11 @@ fn run() -> AdminResult<()> {
         }
         [_, action, path] if action == "list" => {
             for device in read_inventory(Path::new(path))? {
-                println!("{}\t{}", device.name.as_deref().unwrap_or("(legacy)"), device.fingerprint);
+                println!(
+                    "{}\t{}",
+                    device.name.as_deref().unwrap_or("(legacy)"),
+                    device.fingerprint
+                );
             }
         }
         [_, action, certificate] if action == "fingerprint" => {
@@ -281,17 +297,16 @@ mod tests {
 
     #[test]
     fn parses_named_and_legacy_records() {
-        let data = format!(
-            "# comment\n# device: phone\n{}\n\n{}\n",
-            fp('A'),
-            fp('b')
-        );
+        let data = format!("# comment\n# device: phone\n{}\n\n{}\n", fp('A'), fp('b'));
         let devices = parse_inventory(&data).unwrap();
         assert_eq!(devices.len(), 2);
         assert_eq!(devices[0].name.as_deref(), Some("phone"));
         assert_eq!(devices[0].fingerprint, fp('a'));
         assert_eq!(devices[1].name, None);
-        assert_eq!(parse_inventory(&render_inventory(&devices)).unwrap(), devices);
+        assert_eq!(
+            parse_inventory(&render_inventory(&devices)).unwrap(),
+            devices
+        );
     }
 
     #[test]
@@ -305,7 +320,10 @@ mod tests {
             "# device: first\n# device: second\n",
         ];
         for case in cases {
-            assert!(parse_inventory(case).is_err(), "accepted malformed allowlist");
+            assert!(
+                parse_inventory(case).is_err(),
+                "accepted malformed allowlist"
+            );
         }
     }
 
