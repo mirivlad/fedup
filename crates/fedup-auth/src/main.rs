@@ -316,7 +316,7 @@ mod tests {
 
     #[tokio::test]
     async fn oversized_body_is_refused() {
-        let app = app(PathBuf::from("/nonexistent-accounts"));
+        let app = app(PathBuf::from("/nonexistent-accounts"), None);
         let request = Request::post("/api/fedup/v1/login")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from("A".repeat(4096)))
