@@ -43,10 +43,19 @@ PY
   localhost --unsafe-lab-online-ca >"$TMP/auth.log" 2>&1 &
 PID="$!"
 for _ in $(seq 1 50); do
-  if curl -s --max-time 1 "http://127.0.0.1:$PORT/api/fedup/v1/config" \
+  if curl -fsS --max-time 1 -H 'Content-Type: application/json' \
+    -d "{\"username\":\"family\",\"password\":\"$SECRET\"}" \
+    "http://127.0.0.1:$PORT/api/fedup/v1/config" \
     > "$TMP/config.json" 2>/dev/null && [[ -s "$TMP/config.json" ]]; then break; fi
   sleep 0.1
 done
+# An unauthorized active probe must NOT be able to obtain the CA metadata.
+anon_status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 \
+  "http://127.0.0.1:$PORT/api/fedup/v1/config")"
+[[ "$anon_status" == 404 ]] || {
+  echo "FAIL: anonymous config fingerprint exposed (HTTP $anon_status)" >&2
+  exit 1
+}
 if [[ ! -s "$TMP/config.json" ]]; then
   cat "$TMP/auth.log" >&2
   exit 1

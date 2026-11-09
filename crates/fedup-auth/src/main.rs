@@ -8,7 +8,7 @@
 use axum::extract::{DefaultBodyLimit, Json, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::post;
 use axum::Json as JsonResponse;
 use axum::Router;
 use serde::{Deserialize, Serialize};
