@@ -150,6 +150,8 @@ jobs:
         run: cargo build -p fedup-tun -p fedup-users -p fedup-auth -p fedup-enroll -p fedup-identity
       - name: Verify scoped IPv4 NAT with real signed device, DNS UDP and account revocation
         run: sudo bash tests/vps-egress-smoke.sh
+      - name: Verify normal TLS with one-time signed application device proof and full IPv4 egress
+        run: sudo env FEDUP_VPS_AUTH_MODE=proof bash tests/vps-egress-smoke.sh
 
   tun-namespace:
     runs-on: ubuntu-latest
