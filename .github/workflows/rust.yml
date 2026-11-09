@@ -1,0 +1,28 @@
+name: Rust laboratory checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup show
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Unit tests
+        run: cargo test --workspace --all-targets
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Build one-shot mTLS lab
+        run: cargo build -p fedup-lab
+      - name: Exercise lab protocol and certificate verification
+        run: bash tests/lab-smoke.sh

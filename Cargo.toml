@@ -1,0 +1,12 @@
+[workspace]
+members = ["crates/fedup-protocol", "crates/fedup-lab"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/mirivlad/fedup"
+
+[profile.release]
+strip = true
+lto = "thin"
