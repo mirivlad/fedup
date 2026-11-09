@@ -131,11 +131,11 @@ pub fn message(method: &str, path: &str, challenge: &str, fingerprint: &str) -> 
 mod tests {
     use super::*;
     use openssl::asn1::Asn1Time;
-    use openssl::x509::extension::{BasicConstraints, ExtendedKeyUsage};
     use openssl::ec::{EcGroup, EcKey};
     use openssl::nid::Nid;
     use openssl::pkey::PKey;
     use openssl::sign::Signer;
+    use openssl::x509::extension::{BasicConstraints, ExtendedKeyUsage};
     use openssl::x509::{X509NameBuilder, X509};
 
     fn ca_and_device() -> (Vec<u8>, Vec<u8>, PKey<openssl::pkey::Private>) {
