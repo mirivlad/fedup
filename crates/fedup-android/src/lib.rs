@@ -35,7 +35,7 @@ fn admit_untrusted(packet: &[u8], client_to_server: bool) -> bool {
 #[no_mangle]
 #[allow(non_snake_case)]
 pub extern "system" fn Java_top_mirv_fedup_android_NativePacketPolicy_nativeAdmit(
-    mut env: JNIEnv<'_>,
+    env: JNIEnv<'_>,
     _receiver: JObject<'_>,
     packet: JByteArray<'_>,
     client_to_server: jboolean,
