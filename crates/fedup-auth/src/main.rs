@@ -1,20 +1,24 @@
 //! Local-only authentication API for a trusted HTTPS reverse proxy.
 //!
-//! This endpoint checks passwords; it does NOT issue VPN certificates,
-//! register devices, or grant a VPN session yet. Never bind to a public NIC.
+//! Ordinary mode checks passwords only. Explicit unsafe-lab-enroll mode
+//! automatically signs short-lived device CSRs and links them to accounts.
+//! Never bind to a public NIC or use the lab issuer CA key in production.
 //! Reverse proxy MUST authenticate its own TLS certificate and disable caching.
 
 use axum::extract::{DefaultBodyLimit, Json, State};
 use axum::http::{header, StatusCode};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::post;
+use axum::Json as JsonResponse;
 use axum::Router;
 use serde::Deserialize;
+mod issuer;
+use issuer::LabIssuer;
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Semaphore};
@@ -66,10 +70,11 @@ struct App {
     users: PathBuf,
     attempts: Mutex<Limits>,
     workers: Arc<Semaphore>,
+    issuer: Option<LabIssuer>,
 }
 
 impl App {
-    fn new(users: PathBuf) -> Self {
+    fn new(users: PathBuf, issuer: Option<LabIssuer>) -> Self {
         Self {
             users,
             attempts: Mutex::new(Limits {
@@ -77,6 +82,7 @@ impl App {
                 users: HashMap::new(),
             }),
             workers: Arc::new(Semaphore::new(4)),
+            issuer,
         }
     }
 }
@@ -123,24 +129,104 @@ async fn login(State(state): State<Arc<App>>, Json(input): Json<Login>) -> impl 
     }
 }
 
-fn app(users: PathBuf) -> Router {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeviceRequest {
+    username: String,
+    password: String,
+    device: String,
+    csr_pem: String,
+}
+
+/// The same password rate limiting policy applies to device provisioning.
+/// Issuance is bounded and happens on a worker, with a transaction checking
+/// that no password reset, disable or revision change occurred meanwhile.
+async fn enroll_device(
+    State(state): State<Arc<App>>,
+    Json(input): Json<DeviceRequest>,
+) -> Response {
+    let Some(issuer) = state.issuer.clone() else {
+        return reply(StatusCode::SERVICE_UNAVAILABLE).into_response();
+    };
+    if input.username.len() > 48 || input.username.is_empty()
+        || input.password.len() > 128 || input.password.is_empty()
+        || input.device.is_empty() || input.device.len() > 48
+        || input.csr_pem.len() > 8192 || input.csr_pem.is_empty()
+    {
+        return reply(StatusCode::UNAUTHORIZED).into_response();
+    }
+    if !state.attempts.lock().await.allow(&input.username) {
+        return reply(StatusCode::TOO_MANY_REQUESTS).into_response();
+    }
+    let Ok(permit) = state.workers.clone().try_acquire_owned() else {
+        return reply(StatusCode::TOO_MANY_REQUESTS).into_response();
+    };
+    let users = state.users.clone();
+    let device = input.device;
+    let csr_pem = input.csr_pem;
+    let username = input.username;
+    let password = Zeroizing::new(input.password.into_bytes());
+    let task = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let revision = fedup_users::authenticate_revision(&users, &username, &password)
+            .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+            .ok_or(StatusCode::UNAUTHORIZED)?;
+        // The signature on the CSR proves the client holds the corresponding
+        // private key. We never receive or store its private key.
+        let issued = issuer.issue(&csr_pem, &device)
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
+        fedup_users::register_device(
+            &users, &username, revision, &device,
+            &issued.fingerprint_sha256, issued.expires_at,
+        ).map_err(|_| StatusCode::CONFLICT)?;
+        Ok::<_, StatusCode>(issued)
+    }).await;
+
+    match task {
+        Ok(Ok(issued)) => {
+            let mut response = (StatusCode::CREATED, JsonResponse(issued)).into_response();
+            response.headers_mut().insert(
+                header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-store")
+            );
+            response
+        }
+        Ok(Err(status)) => reply(status).into_response(),
+        Err(_) => reply(StatusCode::SERVICE_UNAVAILABLE).into_response(),
+    }
+}
+
+fn app(users: PathBuf, issuer: Option<LabIssuer>) -> Router {
     Router::new()
-        .route("/api/fedup/v1/login", post(login))
-        .layer(DefaultBodyLimit::max(2048))
-        .with_state(Arc::new(App::new(users)))
+        .route(
+            "/api/fedup/v1/login",
+            post(login).layer(DefaultBodyLimit::max(2048)),
+        )
+        .route(
+            "/api/fedup/v1/devices",
+            post(enroll_device).layer(DefaultBodyLimit::max(16 * 1024)),
+        )
+        .with_state(Arc::new(App::new(users, issuer)))
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
-    let [_, cmd, state, port, flag] = args.as_slice() else {
-        return Err(
-            "usage: fedup-auth serve <private-users-dir> <port> --behind-https-proxy".into(),
-        );
+    let (state, port, issuer) = match args.as_slice() {
+        [_, cmd, state, port, flag]
+            if cmd == "serve" && flag == "--behind-https-proxy" =>
+        {
+            (state.as_str(), port.as_str(), None)
+        }
+        [_, cmd, state, port, ca, ca_key, name, flag]
+            if cmd == "serve-enroll-lab" && flag == "--unsafe-lab-online-ca" =>
+        {
+            let lab = LabIssuer::load(Path::new(ca), Path::new(ca_key), name)?;
+            (state.as_str(), port.as_str(), Some(lab))
+        }
+        _ => return Err("usage: fedup-auth serve <users-dir> <port> --behind-https-proxy
+    or: fedup-auth serve-enroll-lab <users-dir> <port> <ca.pem> <CA-KEY.pem> <server-name> --unsafe-lab-online-ca
+The lab signer is NOT safe for any real CA or production VPN.".into()),
     };
-    if cmd != "serve" || flag != "--behind-https-proxy" {
-        return Err("explicit --behind-https-proxy confirmation required".into());
-    }
     let port: u16 = port.parse()?;
     if port == 0 {
         return Err("port 0 is not supported".into());
@@ -154,7 +240,7 @@ async fn main() -> Result<()> {
     let bind = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
     let listener = tokio::net::TcpListener::bind(bind).await?;
     println!("FedUp auth only on {bind} — MUST use trusted HTTPS reverse proxy");
-    axum::serve(listener, app(PathBuf::from(state))).await?;
+    axum::serve(listener, app(PathBuf::from(state), issuer)).await?;
     Ok(())
 }
 
@@ -184,7 +270,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_password_is_never_authorized() {
-        let app = app(PathBuf::from("/nonexistent-accounts"));
+        let app = app(PathBuf::from("/nonexistent-accounts"), None);
         let req = Request::post("/api/fedup/v1/login")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(r#"{"username":"alice","password":""}"#))
