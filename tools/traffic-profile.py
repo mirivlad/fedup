@@ -252,6 +252,7 @@ def main():
     parser.add_argument("--fedup-port", type=int, default=7443)
     parser.add_argument("--https-port", type=int, default=9443)
     parser.add_argument("--https2-port", type=int, default=9553)
+    parser.add_argument("--https2-curl-port", type=int, default=9653)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     captured = []
@@ -264,11 +265,13 @@ def main():
         "fedup": report(captured, args.fedup_port),
         "https_reference": report(captured, args.https_port),
         "https2_reference": report(captured, args.https2_port),
+        "https2_curl_reference": report(captured, args.https2_curl_port),
         "warnings": [
             "ClientHello, IP destinations and flow shape can remain observable.",
             "FedUp raw TLS uses custom frames; its separate h2 mode implements real HTTP/2 but is not browser-equivalent.",
             "HTTP/1.1 control is curl/OpenSSL; HTTP/2 control is nghttp/OpenSSL; neither is a browser.",
-            "HTTP/2 control does not require a TLS client certificate, unlike FedUp.",
+            "HTTP/2 controls do not require a TLS client certificate, unlike FedUp.",
+            "curl HTTPS/2 matches the synthetic FedUp SNI localhost but uses OpenSSL, not Chromium.",
             "Lab flow workloads differ; frame counts and durations cannot be directly compared.",
             "Virtual veth captures may show GSO/GRO artifacts, not exact physical wire frame sizes.",
             "A single controlled capture cannot prove censor detection accuracy.",
@@ -277,11 +280,18 @@ def main():
     }
     if (not result["fedup"]["client_hello_count"]
             or not result["https_reference"]["client_hello_count"]
-            or not result["https2_reference"]["client_hello_count"]):
+            or not result["https2_reference"]["client_hello_count"]
+            or not result["https2_curl_reference"]["client_hello_count"]):
         raise RuntimeError("missing FedUp or HTTPS/1.1 or HTTPS/2 ClientHello; incomplete capture")
-    for hello in result["https2_reference"]["client_hello_visible"]:
-        if "h2" not in hello["offered_alpn"]:
-            raise RuntimeError("HTTPS/2 control did not offer ALPN h2")
+    for control in ("https2_reference", "https2_curl_reference"):
+        for hello in result[control]["client_hello_visible"]:
+            if "h2" not in hello["offered_alpn"]:
+                raise RuntimeError(f"{control} did not offer ALPN h2")
+    if not any(
+        hello.get("sni") == "localhost"
+        for hello in result["https2_curl_reference"]["client_hello_visible"]
+    ):
+        raise RuntimeError("matched-SNI curl HTTPS/2 control has wrong SNI")
     output = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     if args.output:
         fd = os.open(str(args.output), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)

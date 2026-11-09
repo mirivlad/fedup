@@ -183,6 +183,9 @@ if [[ -n "$CAPTURE" ]]; then
   ip netns exec "$SN" nghttpd -d "$TMP/site" 9553 \
     "$TMP/server.key" "$TMP/server.pem" >"$TMP/https2.log" 2>&1 &
   PIDS="$PIDS $!"
+  ip netns exec "$SN" nghttpd -d "$TMP/site" 9653 \
+    "$TMP/server.key" "$TMP/server.pem" >"$TMP/https2-curl.log" 2>&1 &
+  PIDS="$PIDS $!"
 fi
 if ip -n "$CN" route get 1.1.1.1 >/dev/null 2>&1; then
   echo "FAIL: test namespace has external route" >&2; exit 1
@@ -223,7 +226,7 @@ fi
 # capture genuine HTTP/2 and HTTP/1.1 control ClientHellos in the SAME PCAP.
 if [[ -n "$CAPTURE" ]]; then
   ip netns exec "$SN" tcpdump -i "$SV" -n -s 0 -U -w "$CAPTURE" \
-    '(tcp port 7443 or tcp port 9443 or tcp port 9553)' >"$TMP/tcpdump.log" 2>&1 &
+    '(tcp port 7443 or tcp port 9443 or tcp port 9553 or tcp port 9653)' >"$TMP/tcpdump.log" 2>&1 &
   PIDS="$PIDS $!"
   sleep 0.3
   for i in $(seq 1 30); do
@@ -251,6 +254,29 @@ if [[ -n "$CAPTURE" ]]; then
     exit 1
   fi
   echo "Local real HTTPS/2 control in isolated namespace: PASS"
+  # A SECOND authentic HTTP/2 control. curl uses HTTPS hostname localhost
+  # (rather than the numeric address in the test-only nghttp URL), so
+  # SNI now matches the FedUp Rust test client's synthetic hostname.
+  if ! ip netns exec "$CN" curl --version | grep -q HTTP2; then
+    echo "FAIL: curl with HTTP/2 support is required for matched-SNI control" >&2
+    exit 1
+  fi
+  CURL_H2_READY=0
+  for i in $(seq 1 30); do
+    if timeout 4 ip netns exec "$CN" curl -kfsS --noproxy '*' --http2 \
+        --resolve localhost:9653:172.31.44.1 \
+        https://localhost:9653/index.html >"$TMP/curl-http2.log" 2>&1; then
+      CURL_H2_READY=1
+      break
+    fi
+    sleep 0.2
+  done
+  if [[ "$CURL_H2_READY" != 1 ]]; then
+    cat "$TMP/https2-curl.log" "$TMP/curl-http2.log" >&2
+    echo "FAIL: local curl HTTPS/2 matched-SNI baseline" >&2
+    exit 1
+  fi
+  echo "Local curl HTTPS/2 control with matched synthetic SNI: PASS"
 fi
 
 printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" "$CLIENT_CMD" \

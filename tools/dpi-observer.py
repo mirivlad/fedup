@@ -43,14 +43,17 @@ def assess(observation):
     fedup = observation.get("fedup")
     reference = observation.get("https_reference")
     h2_reference = observation.get("https2_reference")
+    curl_h2_reference = observation.get("https2_curl_reference")
     tunnel = get_hello(fedup, "fedup")
     control = get_hello(reference, "https_reference")
     h2_control = get_hello(h2_reference, "https2_reference")
-    if "h2" not in h2_control["offered_alpn"]:
+    curl_h2_control = get_hello(curl_h2_reference, "https2_curl_reference")
+    if "h2" not in h2_control["offered_alpn"] or "h2" not in curl_h2_control["offered_alpn"]:
         raise ValueError("HTTPS/2 control must offer ALPN h2")
     if (tunnel.get("sni") != "localhost"
             or control.get("sni") not in ("localhost", None)
-            or h2_control.get("sni") not in ("localhost", None)):
+            or h2_control.get("sni") not in ("localhost", None)
+            or curl_h2_control.get("sni") != "localhost"):
         raise ValueError("unexpected endpoint; refusing personal or real-world capture")
 
     comparisons = [
@@ -78,11 +81,19 @@ def assess(observation):
         for label, key in protocol_features
         if tunnel[key] != h2_control[key]
     ]
+    curl_h2_differences = [
+        {"feature": label, "fedup": tunnel[key], "control": curl_h2_control[key]}
+        for label, key in protocol_features
+        if tunnel[key] != curl_h2_control[key]
+    ]
     return {
-        "control": "curl/OpenSSL HTTPS/1.1 AND real nghttp/OpenSSL HTTPS/2; neither is Chromium",
+        "control": "curl/OpenSSL HTTPS/1.1, nghttp/OpenSSL HTTPS/2, curl/OpenSSL HTTPS/2; no browser",
         "http2_control": "nghttp/OpenSSL TLS+ALPN h2; not Android, Firefox or Chromium",
         "https2_visible_differences_excluding_port": h2_differences,
         "different_tls_shape_from_https2": bool(h2_differences),
+        "curl_https2_matched_sni": curl_h2_control["sni"] == tunnel["sni"],
+        "https2_curl_visible_differences_excluding_port": curl_h2_differences,
+        "different_tls_shape_from_curl_https2": bool(curl_h2_differences),
         "subject": "synthetic FedUp test connection, NOT physical Android",
         "passive_visible_differences": differences,
         "different_from_this_control": bool(differences),

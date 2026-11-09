@@ -187,13 +187,16 @@ jobs:
           assert result["https_reference"]["client_hello_count"] > 0, "no HTTPS/1.1 ClientHello"
           assert result["https2_reference"]["client_hello_count"] > 0, "no HTTPS/2 ClientHello"
           assert "h2" in result["https2_reference"]["client_hello_visible"][0]["offered_alpn"]
-          print("TLS fingerprints from synthetic FedUp, HTTPS/1.1, real HTTPS/2: PASS")
+          assert "h2" in result["https2_curl_reference"]["client_hello_visible"][0]["offered_alpn"]
+          assert result["https2_curl_reference"]["client_hello_visible"][0]["sni"] == "localhost"
+          print("TLS fingerprints: FedUp, HTTPS/1.1, nghttp HTTPS/2, SNI-matched curl HTTPS/2: PASS")
           PY
       - name: Verify genuine HTTP/2 packet routing and ALPN h2
         run: |
           sudo env FEDUP_TUN_TRANSPORT=h2 FEDUP_CAPTURE_PCAP="$RUNNER_TEMP/fedup-profile/tun-h2.pcap" bash tests/tun-smoke.sh
           sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/fedup-profile/tun-h2.pcap"
           python3 tools/traffic-profile.py "$RUNNER_TEMP/fedup-profile/tun-h2.pcap" --output "$RUNNER_TEMP/fedup-profile/h2-report.json"
+          cat "$RUNNER_TEMP/fedup-profile/h2-report.json"
           python3 - "$RUNNER_TEMP/fedup-profile/report.json" "$RUNNER_TEMP/fedup-profile/h2-report.json" <<'PY'
           import json,sys
           raw=json.load(open(sys.argv[1]))["fedup"]["client_hello_visible"][0]
@@ -215,6 +218,7 @@ jobs:
             "$RUNNER_TEMP/fedup-profile/report.json" \
             "$RUNNER_TEMP/fedup-profile/h2-report.json" \
             --output "$RUNNER_TEMP/fedup-profile/observer.json"
+          cat "$RUNNER_TEMP/fedup-profile/observer.json"
           python3 - "$RUNNER_TEMP/fedup-profile/observer.json" <<'PY'
           import json,sys
           data=json.load(open(sys.argv[1],encoding="utf-8"))
@@ -223,6 +227,7 @@ jobs:
               assert sample["vpn_confirmed"] is False
               assert sample["passive_visible_differences"]
               assert sample["censorship_detection_rate"] is None
+              assert sample["curl_https2_matched_sni"] is True
           print("Passive observer: both FedUp modes differ from local curl control; NOT a VPN detection rate")
           PY
       - name: Repeated matched synthetic traffic comparison
