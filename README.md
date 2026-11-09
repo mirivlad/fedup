@@ -35,6 +35,7 @@
 
 ## Read the design
 
+- [Project overview in Russian / О проекте по-русски](docs/ru/README.md)
 - [Product requirements](docs/requirements.md)
 - [Threat model](docs/threat-model.md)
 - [Architecture decisions](docs/architecture.md)
@@ -48,4 +49,4 @@ Security findings: see [SECURITY.md](SECURITY.md). Keep live endpoints, configs 
 
 ## License
 
-FedUp is intended to be distributed under **GNU GPL-3.0-only**. See [LICENSE](LICENSE) once added.
+FedUp is intended to be distributed under **GNU GPL-3.0-only**. See [LICENSE](LICENSE).
