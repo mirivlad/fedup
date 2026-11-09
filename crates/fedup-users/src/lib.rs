@@ -172,11 +172,7 @@ fn disable(dir: &Path, username: &str, disabled: bool) -> Result<()> {
 /// Return the exact revision authenticated by the password. An issuer MUST
 /// compare this revision inside its registration transaction to prevent a
 /// concurrent password reset from registering a new device.
-pub fn authenticate_revision(
-    dir: &Path,
-    username: &str,
-    password: &[u8],
-) -> Result<Option<i64>> {
+pub fn authenticate_revision(dir: &Path, username: &str, password: &[u8]) -> Result<Option<i64>> {
     if !valid_username(username) || password.len() > PASSWORD_MAX || password.is_empty() {
         return Ok(None);
     }
@@ -248,7 +244,13 @@ pub fn register_device(
     tx.execute(
         "INSERT INTO devices(fingerprint,username,label,revision,expires_at)
          VALUES (?1,?2,?3,?4,?5)",
-        params![fingerprint.to_ascii_lowercase(), username, label, revision, expires_at],
+        params![
+            fingerprint.to_ascii_lowercase(),
+            username,
+            label,
+            revision,
+            expires_at
+        ],
     )?;
     tx.commit()?;
     Ok(())
@@ -280,7 +282,8 @@ pub fn revoke_device(dir: &Path, fingerprint: &str) -> Result<()> {
     if db.execute(
         "UPDATE devices SET disabled=1 WHERE fingerprint=?1 AND disabled=0",
         [fingerprint.to_ascii_lowercase()],
-    )? != 1 {
+    )? != 1
+    {
         return Err("active device not found".into());
     }
     Ok(())
@@ -291,7 +294,6 @@ fn unix_seconds() -> Result<i64> {
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs() as i64)
 }
-
 
 fn list(dir: &Path) -> Result<()> {
     let db = connection(dir)?;
@@ -355,7 +357,7 @@ pub fn run_cli() -> Result<()> {
         [_, cmd, dir, user] if cmd == "enable" => disable(Path::new(dir), user, false),
         [_, cmd, dir, fingerprint] if cmd == "revoke-device" => {
             revoke_device(Path::new(dir), fingerprint)
-        },
+        }
         [_, cmd, dir, user, flag] if cmd == "check" && flag == "--password-stdin" => {
             let pass = stdin_password()?;
             if authenticate(Path::new(dir), user, &pass)? {
@@ -446,11 +448,28 @@ mod tests {
         let pass = b"long-test-passphrase-device";
         add(&dir, "family", pass).unwrap();
         let revision = authenticate_revision(&dir, "family", pass)
-            .unwrap().unwrap();
+            .unwrap()
+            .unwrap();
         let fp = "a1".repeat(32);
-        register_device(&dir, "family", revision, "phone", &fp, unix_seconds().unwrap()+600).unwrap();
+        register_device(
+            &dir,
+            "family",
+            revision,
+            "phone",
+            &fp,
+            unix_seconds().unwrap() + 600,
+        )
+        .unwrap();
         assert!(authorized_device(&dir, &fp).unwrap());
-        assert!(register_device(&dir, "family", revision, "phone", &"b1".repeat(32), unix_seconds().unwrap()+600).is_err());
+        assert!(register_device(
+            &dir,
+            "family",
+            revision,
+            "phone",
+            &"b1".repeat(32),
+            unix_seconds().unwrap() + 600
+        )
+        .is_err());
         disable(&dir, "family", true).unwrap();
         assert!(!authorized_device(&dir, &fp).unwrap());
         disable(&dir, "family", false).unwrap();
