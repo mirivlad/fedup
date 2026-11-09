@@ -1,9 +1,15 @@
-# FedUp simple account login — first phase
+# FedUp automatic device enrollment, laboratory only
 
-The intended family VPN UX is server, username and password. The new fedup-users SSH CLI supports init, add, list, password, disable, enable and check. Passwords are accepted only from stdin and stored in private SQLite as individually salted Argon2id PHC verifiers.
+**Current UX:** user enters HTTPS server, username, password. Android downloads the inner VPN CA over verified public HTTPS, creates a non-exportable P-256 key in Android Keystore, signs PKCS#10 CSR, authenticates to the provisioning API and imports the certificate automatically. No manual invitation or PEM transfer.
 
-The fedup-auth API is restricted to loopback (127.0.0.1), intended behind a correctly authenticated HTTPS reverse proxy. POST /api/fedup/v1/login returns 204 for correct credentials, 401 for denial, or 429 for throttling. Request body, concurrency and per-user/global attempts are limited. Do not expose this plaintext loopback listener outside the machine.
+**Not production:** the lab auto-issuer requires the explicit \`--unsafe-lab-online-ca\` option and a disposable plaintext PKCS#8 CA key. Never expose a real root CA or use this issuer on production VPS. Only the user-login endpoint is suitable for future production hardening. A separate, protected delegated intermediate signer is required.
 
-Android's main screen now requests server, username and password with HTTPS-only certificate validation. On success the remembered password is encrypted with AES-GCM under an Android Keystore key; no plaintext fallback. Previous manual PKI workflow is under Advanced Diagnostics.
+Command-line account administration: \`fedup-users init/add/password/disable/enable/devices/check-device/revoke-device/migrate\`. Argon2id hashes remain private in SQLite. A registered cert fingerprint binds to a username and exact account revision. Disabling or resetting a user invalidates all prior devices, including active VPN connections on the server's next 5-second check.
 
-**This is not yet credential-based VPN connectivity.** The login endpoint validates only the account; it does not issue device certificates, register devices or grant data-plane access. The existing VPN transport still expects mTLS enrollment. Future tasks include automatic device-key issuance, delegated signing, user/device revocation and real Android↔server acceptance testing before any production installation. See docs/ru/accounts.md.
+Laboratory API: \`fedup-auth serve-enroll-lab <users-dir> <port> <ca.pem> <ca.key> <server-dns> --unsafe-lab-online-ca\`, bound only to 127.0.0.1. Endpoints: POST /api/fedup/v1/login; GET /api/fedup/v1/config (public CA and hash); POST /api/fedup/v1/devices (username/password/device/CSR, returns 7-day client certificate). Request sizes, login attempts and Argon2id concurrency are bounded. Exact identical CSR retries return the originally stored certificate rather than creating duplicates. HTTPS reverse proxy and edge-level rate limits are mandatory before any exposure.
+
+Experimental TUN server: \`fedup-tun server-h2-accounts <private-ip:port> <tun> <ca.pem> <server.pem> <server.key> <users-dir>\`, only in isolated namespaces and with fixed lab addresses. It requires mTLS plus active account device authorization and continuously rechecks authorization.
+
+Acceptance test: \`bash tests/users-enroll-smoke.sh\` builds a disposable CA, signs a real OpenSSL P-256 CSR through the API, verifies the certificate, tests retries, bad password and user revocation. Android compiles in CI but has **not** been tested against a live phone or server.
+
+No full-tunnel Internet routing, DNS protection, real online issuer isolation, certificate renewal, stable Android APK signing or censorship-resistance testing yet. See docs/ru/accounts.md for detailed steps.
