@@ -58,8 +58,9 @@ if grep -q -- 'BEGIN PRIVATE KEY-----' "$TEMP/device/client-key.enc.pem"; then
   echo "SECURITY FAILURE: unencrypted private key exposed" >&2
   exit 1
 fi
-if "$DEVICE" request "$TEMP/invite.json" "$TEMP/device" "$TEMP/overwrite.json" \
-   --passphrase-stdin </dev/null >/dev/null 2>&1; then
+if printf '%s\n%s\n' "$PASSWORD" "$PASSWORD" | \
+  "$DEVICE" request "$TEMP/invite.json" "$TEMP/device" "$TEMP/overwrite.json" \
+   --passphrase-stdin >/dev/null 2>&1; then
   echo "SECURITY FAILURE: reused device directory accepted" >&2; exit 1
 fi
 "$ENROLL" approve "$TEMP/issuer" "$TEMP/ca.pem" "$TEMP/ca.key" \
@@ -75,7 +76,7 @@ if printf '%s\n' "$PASSWORD" | "$DEVICE" import \
 fi
 printf '%s\n' "$PASSWORD" | "$DEVICE" import \
   "$TEMP/device" "$TEMP/issued.pem" --passphrase-stdin
-cmp "$TEMP/device/client.pem" "$TEMP/issued.pem"
+cmp <(openssl x509 -in "$TEMP/device/client.pem" -outform DER) <(openssl x509 -in "$TEMP/issued.pem" -outform DER)
 
 "$ADMIN" init "$TEMP/allowed.txt"
 "$ADMIN" add "$TEMP/allowed.txt" family-phone "$TEMP/device/client.pem"
