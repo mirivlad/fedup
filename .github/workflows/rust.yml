@@ -145,7 +145,7 @@ jobs:
       - name: Install isolated routing test tools
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iproute2 iputils-ping nftables curl openssl
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iproute2 iputils-ping nftables curl openssl nghttp2-client
       - name: Build account issuer, Linux device and HTTP2 IPv4 gateway
         run: cargo build -p fedup-tun -p fedup-users -p fedup-auth -p fedup-enroll -p fedup-identity
       - name: Verify scoped IPv4 NAT with real signed device, DNS UDP and account revocation

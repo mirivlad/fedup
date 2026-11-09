@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 [[ "$(id -u)" == 0 ]] || { echo "root required" >&2; exit 2; }
-for cmd in ip nft curl python3 openssl ping sysctl timeout; do
+for cmd in ip nft curl python3 openssl ping sysctl timeout nghttp; do
   command -v "$cmd" >/dev/null || { echo "missing $cmd" >&2; exit 2; }
 done
 [[ -c /dev/net/tun ]] || { echo "/dev/net/tun unavailable" >&2; exit 2; }
@@ -162,6 +162,22 @@ for _ in $(seq 1 30); do
   sleep 0.1
 done
 [[ -f "$TMP/idle-ready" ]] || { cat "$TMP/idle.log" >&2; exit 1; }
+# Anonymous browser must receive real HTML without a client certificate,
+# over both standards-compliant HTTP/1.1 and HTTP/2. Device access remains
+# independent and is tested below. Everything stays inside Linux namespaces.
+if ! timeout 7 ip netns exec "$CN" curl -kfsS --noproxy '*' --http1.1 \
+    --connect-timeout 2 "https://172.31.44.1:7443/" | grep -q "Service is online"; then
+  echo "FAIL: anonymous HTTP/1.1 fallback unavailable" >&2; exit 1
+fi
+if ! timeout 7 ip netns exec "$CN" nghttp --no-verify-peer \
+    "https://172.31.44.1:7443/" | grep -q "Service is online"; then
+  echo "FAIL: anonymous HTTP/2 fallback unavailable" >&2; exit 1
+fi
+if timeout 5 ip netns exec "$CN" curl -kfsS --noproxy '*' --http1.1 \
+    "https://172.31.44.1:7443/fedup-lab/v1/ip-tunnel" >/dev/null 2>&1; then
+  echo "FAIL: anonymous access exposed a protected HTTP endpoint" >&2; exit 1
+fi
+echo "Anonymous HTTP/1.1 and HTTP/2 web fallback; protected URL denied: PASS"
 echo "Unauthenticated idle TLS socket deliberately held open"
 printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" \
   client-vps-v4 172.31.44.1:7443 futclient "$TMP/device" \

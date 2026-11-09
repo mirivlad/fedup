@@ -498,13 +498,13 @@ const PUBLIC_REQUEST_LIMIT: usize = 4096;
 
 fn public_page(method: &str, path: &str) -> (StatusCode, &'static str, &'static [u8]) {
     if method == "GET" && (path == "/" || path == "/index.html") {
-        (
-            StatusCode::OK,
-            "text/html; charset=utf-8",
-            PUBLIC_PAGE,
-        )
+        (StatusCode::OK, "text/html; charset=utf-8", PUBLIC_PAGE)
     } else {
-        (StatusCode::NOT_FOUND, "text/plain; charset=utf-8", PUBLIC_NOT_FOUND)
+        (
+            StatusCode::NOT_FOUND,
+            "text/plain; charset=utf-8",
+            PUBLIC_NOT_FOUND,
+        )
     }
 }
 
@@ -514,10 +514,8 @@ async fn public_https_session(mut tls: tokio_rustls::server::TlsStream<TcpStream
         let (request, mut respond) = timeout(IO_TIMEOUT, connection.accept())
             .await?
             .ok_or("anonymous HTTP/2 client closed before request")??;
-        let (status, content_type, body) = public_page(
-            request.method().as_str(),
-            request.uri().path(),
-        );
+        let (status, content_type, body) =
+            public_page(request.method().as_str(), request.uri().path());
         let mut outgoing = respond.send_response(
             Response::builder()
                 .status(status)
@@ -553,13 +551,16 @@ async fn public_https_session(mut tls: tokio_rustls::server::TlsStream<TcpStream
     let head = std::str::from_utf8(&request)?;
     let line = head.lines().next().unwrap_or("");
     let parts: Vec<_> = line.split_ascii_whitespace().collect();
-    let (status, content_type, body) = if parts.len() == 3
-        && (parts[2] == "HTTP/1.1" || parts[2] == "HTTP/1.0")
-    {
-        public_page(parts[0], parts[1])
-    } else {
-        (StatusCode::BAD_REQUEST, "text/plain; charset=utf-8", PUBLIC_NOT_FOUND)
-    };
+    let (status, content_type, body) =
+        if parts.len() == 3 && (parts[2] == "HTTP/1.1" || parts[2] == "HTTP/1.0") {
+            public_page(parts[0], parts[1])
+        } else {
+            (
+                StatusCode::BAD_REQUEST,
+                "text/plain; charset=utf-8",
+                PUBLIC_NOT_FOUND,
+            )
+        };
     let headers = format!(
         "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         status.as_u16(),
