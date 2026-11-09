@@ -109,6 +109,7 @@ IPv4 when visiting an external IP-check site; CI alone does not satisfy it.
 
 - [Project overview in Russian / О проекте по-русски](docs/ru/README.md)
 - [Status and acceptance matrix / Статус и приёмка](docs/ru/status-2026-11-10.md)
+- [Measured iterative DPI report (Russian)](docs/ru/dpi-iteration-report-2026-11-10.md)
 - [Product requirements](docs/requirements.md)
 - [Threat model](docs/threat-model.md)
 - [Architecture decisions](docs/architecture.md)
