@@ -25,8 +25,9 @@ const MAX_USERS: i64 = 256;
 
 fn valid_username(name: &str) -> bool {
     (1..=48).contains(&name.len())
-        && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()
-            || matches!(b, b'-' | b'_' | b'.'))
+        && name.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_' | b'.')
+        })
 }
 
 fn hash_config() -> Result<Argon2<'static>> {
@@ -40,15 +41,11 @@ fn hash_config() -> Result<Argon2<'static>> {
 }
 
 fn hash_password(password: &[u8]) -> Result<String> {
-    if !(PASSWORD_MIN..=PASSWORD_MAX).contains(&password.len())
-        || password.contains(&0)
-    {
+    if !(PASSWORD_MIN..=PASSWORD_MAX).contains(&password.len()) || password.contains(&0) {
         return Err("password must be 12-128 bytes, without NUL".into());
     }
     let salt = SaltString::generate(&mut OsRng);
-    Ok(hash_config()?
-        .hash_password(password, &salt)?
-        .to_string())
+    Ok(hash_config()?.hash_password(password, &salt)?.to_string())
 }
 
 fn verify_password(phc: &str, password: &[u8]) -> bool {
@@ -65,22 +62,17 @@ fn verify_password(phc: &str, password: &[u8]) -> bool {
     {
         return false;
     }
-    hash_config()
-        .is_ok_and(|argon| argon.verify_password(password, &parsed).is_ok())
+    hash_config().is_ok_and(|argon| argon.verify_password(password, &parsed).is_ok())
 }
 
 fn state_path(dir: &Path) -> Result<PathBuf> {
     let meta = fs::symlink_metadata(dir)?;
-    if !meta.is_dir() || meta.file_type().is_symlink()
-        || meta.permissions().mode() & 0o077 != 0
-    {
+    if !meta.is_dir() || meta.file_type().is_symlink() || meta.permissions().mode() & 0o077 != 0 {
         return Err("user directory must be an ordinary private directory (0700)".into());
     }
     let path = dir.join(DB_FILE);
     let db = fs::symlink_metadata(&path)?;
-    if !db.is_file() || db.file_type().is_symlink()
-        || db.permissions().mode() & 0o077 != 0
-    {
+    if !db.is_file() || db.file_type().is_symlink() || db.permissions().mode() & 0o077 != 0 {
         return Err("user database must be an ordinary private file (0600)".into());
     }
     Ok(path)
@@ -88,10 +80,7 @@ fn state_path(dir: &Path) -> Result<PathBuf> {
 
 fn connection(dir: &Path) -> Result<Connection> {
     let path = state_path(dir)?;
-    let db = Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
-    )?;
+    let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     db.busy_timeout(Duration::from_secs(10))?;
     db.execute_batch("PRAGMA foreign_keys=ON;")?;
     Ok(db)
@@ -148,7 +137,8 @@ fn change_password(dir: &Path, username: &str, password: &[u8]) -> Result<()> {
     if db.execute(
         "UPDATE users SET password_phc=?2, revision=revision+1 WHERE username=?1",
         params![username, phc],
-    )? != 1 {
+    )? != 1
+    {
         return Err("user not found".into());
     }
     Ok(())
@@ -162,7 +152,8 @@ fn disable(dir: &Path, username: &str, disabled: bool) -> Result<()> {
     if db.execute(
         "UPDATE users SET disabled=?2,revision=revision+1 WHERE username=?1",
         params![username, i64::from(disabled)],
-    )? != 1 {
+    )? != 1
+    {
         return Err("user not found".into());
     }
     Ok(())
@@ -206,7 +197,9 @@ fn list(dir: &Path) -> Result<()> {
 
 fn stdin_password() -> Result<Zeroizing<Vec<u8>>> {
     let mut password = Zeroizing::new(Vec::new());
-    io::stdin().take((PASSWORD_MAX + 2) as u64).read_to_end(&mut password)?;
+    io::stdin()
+        .take((PASSWORD_MAX + 2) as u64)
+        .read_to_end(&mut password)?;
     if password.last() == Some(&b'\n') {
         password.pop();
         if password.last() == Some(&b'\r') {
@@ -279,7 +272,8 @@ mod tests {
 
     fn isolated() -> PathBuf {
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("fedup-users-test-{}-{}", std::process::id(), id));
+        let dir =
+            std::env::temp_dir().join(format!("fedup-users-test-{}-{}", std::process::id(), id));
         init(&dir).unwrap();
         dir
     }
@@ -309,7 +303,10 @@ mod tests {
         assert!(add(&dir, "../../etc", b"very-long-example-passphrase").is_err());
         assert!(add(&dir, "MixedCase", b"very-long-example-passphrase").is_err());
         assert!(add(&dir, "alice", b"short").is_err());
-        let target = dir.parent().unwrap().join("fedup-users-untrusted-symlink-test");
+        let target = dir
+            .parent()
+            .unwrap()
+            .join("fedup-users-untrusted-symlink-test");
         let _ = fs::remove_file(&target);
         std::os::unix::fs::symlink(&dir, &target).unwrap();
         assert!(connection(&target).is_err());
@@ -323,9 +320,13 @@ mod tests {
         let password = b"example-long-secret-phrase";
         add(&dir, "alice", password).unwrap();
         let db = connection(&dir).unwrap();
-        let hash: String = db.query_row(
-            "SELECT password_phc FROM users WHERE username='alice'", [], |row| row.get(0)
-        ).unwrap();
+        let hash: String = db
+            .query_row(
+                "SELECT password_phc FROM users WHERE username='alice'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert!(hash.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"));
         assert!(!hash.contains("example-long-secret"));
         assert!(verify_password(&hash, password));
