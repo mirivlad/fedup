@@ -8,6 +8,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.text.InputFilter
+import android.text.InputType
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
@@ -41,7 +43,7 @@ class MainActivity : Activity() {
         try {
             val found = enrollment.device()
             message(when {
-                found == null -> "Ключ устройства ещё не создан."
+                found == null -> "Добавьте сервер, логин и пароль для входа."
                 found.enrolled -> "Сертификат " + found.device +
                     " проверен. Доступен только тестовый VPN для четырёх адресов, НЕ для Интернета."
                 else -> "Ключ устройства " + found.device +
@@ -86,19 +88,74 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(28, 32, 28, 32)
         }
-        label(layout, "FedUp — регистрация Android")
+        label(layout, "FedUp")
         layout.addView(TextView(this).apply {
-            text = "Приватный ключ создаётся на телефоне. Здесь доступен только " +
-                "лабораторный VPN для четырёх фиксированных адресов; обычный Интернет " +
-                "и DNS НЕ защищены. Always-on отключён."
+            text = "Добавьте сервер и введите учётные данные. " +
+                "Пока проверяется только авторизация; автоматическая регистрация устройства " +
+                "и обычное VPN-подключение ещё в разработке."
         })
         status = TextView(this).apply { textSize = 15f; setPadding(0, 16, 0, 16) }
         layout.addView(status)
 
-        label(layout, "1. Приглашение администратора")
-        invitation = entry(layout, "Вставьте или откройте invite.json")
-        action(layout, "Открыть приглашение") { pick(PICK_INVITE) }
-        action(layout, "Создать ключ Android Keystore и запрос CSR") {
+        val prefs = getSharedPreferences("fedup_account", MODE_PRIVATE)
+        val server = EditText(this).apply {
+            hint = "Сервер, например vpn.example.net"
+            setSingleLine(true)
+            setText(prefs.getString("server", ""))
+        }
+        layout.addView(server, ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT)
+        val login = EditText(this).apply {
+            hint = "Логин"
+            setSingleLine(true)
+            setText(prefs.getString("username", ""))
+        }
+        layout.addView(login, ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT)
+        val password = EditText(this).apply {
+            hint = "Пароль"
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        layout.addView(password, ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT)
+        action(layout, "Проверить доступ") {
+            val host = server.text.toString().trim()
+            val username = login.text.toString().trim()
+            val secret = password.text.toString()
+            require(secret.isNotBlank()) { "Введите пароль" }
+            password.text.clear()
+            message("Проверка учётной записи по HTTPS...")
+            Thread {
+                try {
+                    AccountLogin.check(host, username, secret)
+                    prefs.edit().putString("server", host)
+                        .putString("username", username).apply()
+                    runOnUiThread {
+                        message("Пользователь подтверждён сервером. " +
+                            "Автоматическая выдача ключа и VPN-подключение пока не реализованы.")
+                    }
+                } catch (error: Exception) {
+                    runOnUiThread {
+                        message("Вход не выполнен: " + error.message)
+                    }
+                }
+            }.start()
+        }
+
+        val advanced = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        action(layout, "Расширенная диагностика и ручная регистрация") {
+            advanced.visibility = if (advanced.visibility == View.GONE)
+                View.VISIBLE else View.GONE
+        }
+        layout.addView(advanced)
+        label(advanced, "1. Приглашение администратора")
+        invitation = entry(advanced, "Вставьте или откройте invite.json")
+        action(advanced, "Открыть приглашение") { pick(PICK_INVITE) }
+        action(advanced, "Создать ключ Android Keystore и запрос CSR") {
             val raw = invitation.text.toString()
             require(raw.isNotBlank()) { "Введите приглашение" }
             Thread {
@@ -114,7 +171,7 @@ class MainActivity : Activity() {
                 }
             }.start()
         }
-        action(layout, "Сохранить request.json для администратора") {
+        action(advanced, "Сохранить request.json для администратора") {
             enrollment.pendingRequest()
             startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
@@ -123,10 +180,10 @@ class MainActivity : Activity() {
             }, SAVE_REQUEST)
         }
 
-        label(layout, "2. Подписанный сертификат от администратора")
-        certificate = entry(layout, "Вставьте или откройте client.pem")
-        action(layout, "Открыть сертификат") { pick(PICK_CERT) }
-        action(layout, "Проверить и импортировать сертификат") {
+        label(advanced, "2. Подписанный сертификат от администратора")
+        certificate = entry(advanced, "Вставьте или откройте client.pem")
+        action(advanced, "Открыть сертификат") { pick(PICK_CERT) }
+        action(advanced, "Проверить и импортировать сертификат") {
             val pem = certificate.text.toString()
             require(pem.isNotBlank()) { "Введите сертификат" }
             Thread {
@@ -143,8 +200,8 @@ class MainActivity : Activity() {
                 }
             }.start()
         }
-        label(layout, "3. Проверка взаимной TLS-аутентификации")
-        layout.addView(TextView(this).apply {
+        label(advanced, "3. Проверка взаимной TLS-аутентификации")
+        advanced.addView(TextView(this).apply {
             text = "Введите адрес FedUp-сервера и порт, например 192.168.1.10:7443. " +
                 "Имя TLS и доверенный CA берутся только из приглашения. " +
                 "Этот тест не создаёт VPN и не меняет маршруты."
@@ -154,9 +211,9 @@ class MainActivity : Activity() {
             setSingleLine(true)
             filters = arrayOf(InputFilter.LengthFilter(253))
         }
-        layout.addView(endpoint, ViewGroup.LayoutParams.MATCH_PARENT,
+        advanced.addView(endpoint, ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT)
-        action(layout, "Проверить TLS 1.3, HTTP/2 и допуск устройства") {
+        action(advanced, "Проверить TLS 1.3, HTTP/2 и допуск устройства") {
             val address = endpoint.text.toString().trim()
             require(address.isNotBlank()) { "Введите адрес сервера" }
             Thread {
@@ -168,7 +225,7 @@ class MainActivity : Activity() {
                 }
             }.start()
         }
-        action(layout, "Лаб: подключить только тестовые IP (не защищает Интернет)") {
+        action(advanced, "Лаб: подключить только тестовые IP (не защищает Интернет)") {
             val address = endpoint.text.toString().trim()
             require(enrollment.device()?.enrolled == true) {
                 "Сначала получите сертификат устройства"
@@ -192,13 +249,13 @@ class MainActivity : Activity() {
                 }
                 .show()
         }
-        action(layout, "Отключить лабораторный VPN") {
+        action(advanced, "Отключить лабораторный VPN") {
             startService(Intent(this, FedUpVpnService::class.java)
                 .setAction(FedUpVpnService.STOP))
             message("Запрошено отключение лабораторного VPN.")
         }
-        label(layout, "Диагностика")
-        action(layout, "Проверить Rust-ядро") {
+        label(advanced, "Диагностика")
+        action(advanced, "Проверить Rust-ядро") {
             message(if (NativePacketPolicy.available())
                 "Rust-ядро доступно. Это НЕ VPN-подключение."
             else "Rust-ядро недоступно: подключение запрещено.")
