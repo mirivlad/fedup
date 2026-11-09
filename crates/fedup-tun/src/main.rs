@@ -66,7 +66,7 @@ fn fingerprint(cert: &[u8]) -> String {
 }
 
 /// Fail closed on any missing, oversized or malformed device authorization file.
-fn authorized(path: &Path, fp: &str) -> Result<bool> {
+fn authorized_allowlist(path: &Path, fp: &str) -> Result<bool> {
     if fs::metadata(path)?.len() > MAX_ALLOWLIST_BYTES {
         return Err("device allowlist too large".into());
     }
@@ -88,6 +88,21 @@ fn authorized(path: &Path, fp: &str) -> Result<bool> {
         }
     }
     Ok(found)
+}
+
+#[derive(Clone)]
+enum DeviceAuthorization {
+    Allowlist(PathBuf),
+    AccountDatabase(PathBuf),
+}
+
+fn authorized(policy: &DeviceAuthorization, fp: &str) -> Result<bool> {
+    match policy {
+        DeviceAuthorization::Allowlist(path) => authorized_allowlist(path, fp),
+        DeviceAuthorization::AccountDatabase(dir) => {
+            Ok(fedup_users::authorized_device(dir, fp)?)
+        }
+    }
 }
 
 /// Extra laboratory safeguard: refuse to start in the initial network
@@ -168,7 +183,7 @@ async fn forward<T>(
     stream: T,
     tun: Arc<Tun>,
     is_client: bool,
-    revocation: Option<(PathBuf, String)>,
+    revocation: Option<(DeviceAuthorization, String)>,
 ) -> Result<()>
 where
     T: AsyncRead + AsyncWrite + Unpin,
@@ -297,7 +312,7 @@ fn is_h2_request(request: &Request<RecvStream>) -> bool {
 async fn h2_server_session(
     tls: tokio_rustls::server::TlsStream<TcpStream>,
     tun: Arc<Tun>,
-    revocation: (PathBuf, String),
+    revocation: (DeviceAuthorization, String),
 ) -> Result<()> {
     if tls.get_ref().1.alpn_protocol() != Some(b"h2".as_slice()) {
         return Err("ALPN h2 required for HTTP/2 TUN".into());
@@ -428,7 +443,7 @@ async fn server_session(
     socket: TcpStream,
     acceptor: TlsAcceptor,
     tun: Arc<Tun>,
-    allowlist: &Path,
+    authorization: &DeviceAuthorization,
     http2: bool,
 ) -> Result<()> {
     let mut tls = timeout(IO_TIMEOUT, acceptor.accept(socket)).await??;
@@ -439,16 +454,16 @@ async fn server_session(
         .and_then(|chain| chain.first())
         .ok_or("missing mTLS device certificate")?;
     let fp = fingerprint(peer.as_ref());
-    if !authorized(allowlist, &fp)? {
+    if !authorized(authorization, &fp)? {
         return Err("device not authorized".into());
     }
     if http2 {
-        return h2_server_session(tls, tun, (allowlist.to_path_buf(), fp)).await;
+        return h2_server_session(tls, tun, (authorization.clone(), fp)).await;
     }
     let req = read_frame(&mut tls).await?;
     expect_open(req)?;
     open(&mut tls).await?;
-    forward(tls, tun, false, Some((allowlist.to_path_buf(), fp))).await
+    forward(tls, tun, false, Some((authorization.clone(), fp))).await
 }
 
 async fn server(
@@ -457,7 +472,7 @@ async fn server(
     ca: &Path,
     certificate: &Path,
     key: &Path,
-    allowlist: &Path,
+    authorization: DeviceAuthorization,
     http2: bool,
 ) -> Result<()> {
     require_isolated_network_namespace()?;
@@ -467,7 +482,15 @@ async fn server(
     if listen.is_ipv6() {
         return Err("IPv6 outer transport not configured in this lab".into());
     }
-    let _ = authorized(allowlist, "")?;
+    match &authorization {
+        DeviceAuthorization::Allowlist(path) => {
+            let _ = authorized_allowlist(path, "")?;
+        }
+        DeviceAuthorization::AccountDatabase(dir) => {
+            // Validate account DB presence/permissions before accepting a socket.
+            let _ = fedup_users::authenticate(dir, "startup-probe", b"not-a-valid-password")?;
+        }
+    }
     let mut config = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
         .with_client_cert_verifier(
             rustls::server::WebPkiClientVerifier::builder(Arc::new(roots(ca)?)).build()?,
@@ -483,7 +506,7 @@ async fn server(
     loop {
         let (socket, _) = listener.accept().await?;
         if let Err(error) =
-            server_session(socket, acceptor.clone(), tun.clone(), allowlist, http2).await
+            server_session(socket, acceptor.clone(), tun.clone(), &authorization, http2).await
         {
             eprintln!("IP session closed: {error}");
         }
@@ -541,6 +564,7 @@ fn usage() {
 fedup-tun server <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <allowlist.txt>
 fedup-tun client <private-server-ip:port> <tun-name> <enrolled-device-dir> [--passphrase-stdin]
 fedup-tun server-h2 <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <allowlist.txt>
+fedup-tun server-h2-accounts <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <users-dir>
 fedup-tun client-h2 <private-server-ip:port> <tun-name> <enrolled-device-dir> [--passphrase-stdin]
 fedup-tun probe-h2 <private-server-ip:port> <enrolled-device-dir> [--passphrase-stdin]
 
@@ -564,8 +588,20 @@ async fn main() {
                     Path::new(ca),
                     Path::new(cert),
                     Path::new(key),
-                    Path::new(allow),
+                    DeviceAuthorization::Allowlist(PathBuf::from(allow)),
                     cmd == "server-h2",
+                )
+                .await
+            }
+            [_, cmd, bind, tun, ca, cert, key, users] if cmd == "server-h2-accounts" => {
+                server(
+                    bind.parse()?,
+                    tun,
+                    Path::new(ca),
+                    Path::new(cert),
+                    Path::new(key),
+                    DeviceAuthorization::AccountDatabase(PathBuf::from(users)),
+                    true,
                 )
                 .await
             }
