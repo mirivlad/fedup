@@ -25,7 +25,7 @@ case "$MODE" in
 esac
 umask 077
 TMP="$(mktemp -d)"
-CN="fuc$"; SN="fus$"; EN="fue$"; CV="vfc$"; SV="vfs$"; SE="vse$"; EV="vee$"; BW="vbw$"; BE="vbe$"
+CN="fuc$BASHPID"; SN="fus$BASHPID"; EN="fue$BASHPID"; CV="vfc$BASHPID"; SV="vfs$BASHPID"; SE="vse$BASHPID"; EV="vee$BASHPID"; BW="vbw$BASHPID"; BE="vbe$BASHPID"
 PIDS=""
 cleanup() {
   set +e
@@ -390,10 +390,10 @@ if [[ "$FAULT_MODE" == 1 ]]; then
     echo "FAIL: TUN remained after client process termination" >&2; exit 1
   fi
   # The kernel now tries a REAL alternative route. nftables must block it.
-  ip -n "$CN" route get 10.88.0.10 | grep -q "dev $BW" || {
+  ip -n "$CN" route get 10.88.0.10 | grep -Fq "dev $BW" || {
     echo "FAIL: alternate IPv4 route did not become active" >&2; exit 1;
   }
-  ip -n "$CN" -6 route get fd42:fed1::10 | grep -q "dev $BW" || {
+  ip -n "$CN" -6 route get fd42:fed1::10 | grep -Fq "dev $BW" || {
     echo "FAIL: alternate IPv6 route did not become active" >&2; exit 1;
   }
   if timeout 4 ip netns exec "$CN" ping -n -c 1 -W 1 10.88.0.10 >/dev/null 2>&1; then
