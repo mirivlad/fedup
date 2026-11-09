@@ -486,6 +486,93 @@ async fn h2_auth_probe(
     Ok(())
 }
 
+// Public HTTPS fallback for anonymous clients in the opt-in VPS mode only.
+//
+// This is a small ordinary web response, NOT an anti-DPI guarantee: a probing
+// TLS client can still observe rustls's optional CertificateRequest and the
+// VPN is currently on a separate TCP port. Application-level device proof
+// and a single shared 443 listener must be designed before production use.
+const PUBLIC_PAGE: &[u8] = b"<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>Home</title></head><body><main><h1>Welcome</h1><p>Service is online.</p></main></body></html>\n";
+const PUBLIC_NOT_FOUND: &[u8] = b"Not Found\n";
+const PUBLIC_REQUEST_LIMIT: usize = 4096;
+
+fn public_page(method: &str, path: &str) -> (StatusCode, &'static str, &'static [u8]) {
+    if method == "GET" && (path == "/" || path == "/index.html") {
+        (
+            StatusCode::OK,
+            "text/html; charset=utf-8",
+            PUBLIC_PAGE,
+        )
+    } else {
+        (StatusCode::NOT_FOUND, "text/plain; charset=utf-8", PUBLIC_NOT_FOUND)
+    }
+}
+
+async fn public_https_session(mut tls: tokio_rustls::server::TlsStream<TcpStream>) -> Result<()> {
+    if tls.get_ref().1.alpn_protocol() == Some(b"h2".as_slice()) {
+        let mut connection = timeout(IO_TIMEOUT, h2_server::handshake(tls)).await??;
+        let (request, mut respond) = timeout(IO_TIMEOUT, connection.accept())
+            .await?
+            .ok_or("anonymous HTTP/2 client closed before request")??;
+        let (status, content_type, body) = public_page(
+            request.method().as_str(),
+            request.uri().path(),
+        );
+        let mut outgoing = respond.send_response(
+            Response::builder()
+                .status(status)
+                .header(http::header::CONTENT_TYPE, content_type)
+                .header(http::header::CONTENT_LENGTH, body.len().to_string())
+                .body(())?,
+            false,
+        )?;
+        outgoing.send_data(Bytes::from_static(body), true)?;
+        // HTTP/2 HEADERS/DATA must be flushed by driving the state machine.
+        connection.graceful_shutdown();
+        let _ = timeout(Duration::from_secs(2), connection.accept()).await;
+        return Ok(());
+    }
+
+    // Minimal HTTP/1.1 GET fallback, with a bounded header and timeout.
+    // No device identity, SQL, certificate material or TUN is ever accessed.
+    let mut request = Vec::new();
+    loop {
+        if request.len() >= PUBLIC_REQUEST_LIMIT {
+            return Err("anonymous HTTP request headers too large".into());
+        }
+        let mut buf = [0u8; 512];
+        let n = timeout(IO_TIMEOUT, tls.read(&mut buf)).await??;
+        if n == 0 {
+            return Err("anonymous HTTP client disconnected".into());
+        }
+        request.extend_from_slice(&buf[..n]);
+        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+    let head = std::str::from_utf8(&request)?;
+    let line = head.lines().next().unwrap_or("");
+    let parts: Vec<_> = line.split_ascii_whitespace().collect();
+    let (status, content_type, body) = if parts.len() == 3
+        && (parts[2] == "HTTP/1.1" || parts[2] == "HTTP/1.0")
+    {
+        public_page(parts[0], parts[1])
+    } else {
+        (StatusCode::BAD_REQUEST, "text/plain; charset=utf-8", PUBLIC_NOT_FOUND)
+    };
+    let headers = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        status.as_u16(),
+        status.canonical_reason().unwrap_or(""),
+        content_type,
+        body.len(),
+    );
+    timeout(IO_TIMEOUT, tls.write_all(headers.as_bytes())).await??;
+    timeout(IO_TIMEOUT, tls.write_all(body)).await??;
+    timeout(IO_TIMEOUT, tls.shutdown()).await??;
+    Ok(())
+}
+
 async fn server_session(
     socket: TcpStream,
     acceptor: TlsAcceptor,
@@ -500,8 +587,16 @@ async fn server_session(
         .get_ref()
         .1
         .peer_certificates()
-        .and_then(|chain| chain.first())
-        .ok_or("missing mTLS device certificate")?;
+        .and_then(|chain| chain.first());
+    let Some(peer) = peer else {
+        if mode.internet_v4() {
+            // Anonymous browser clients must NEVER reach device
+            // authorization, HTTP/2 tunnel handlers or the TUN.
+            drop(handshake_slot);
+            return public_https_session(tls).await;
+        }
+        return Err("missing mTLS device certificate".into());
+    };
     let fp = fingerprint(peer.as_ref());
     if !authorized(authorization, &fp)? {
         return Err("device not authorized".into());
@@ -561,12 +656,22 @@ async fn server(
             let _ = fedup_users::authenticate(dir, "startup-probe", b"not-a-valid-password")?;
         }
     }
+    let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(roots(ca)?));
+    // On the optional VPS public-facing port, a visitor without a device
+    // certificate gets a harmless HTTPS page. An authenticated IP session
+    // still REQUIRES a valid chain, an authorized fingerprint and live checks.
+    // Other laboratory modes retain mandatory mTLS.
+    let verifier = if mode.internet_v4() {
+        verifier.allow_unauthenticated()
+    } else {
+        verifier
+    };
     let mut config = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
-        .with_client_cert_verifier(
-            rustls::server::WebPkiClientVerifier::builder(Arc::new(roots(ca)?)).build()?,
-        )
+        .with_client_cert_verifier(verifier.build()?)
         .with_single_cert(ca_certs(certificate)?, load_key(key)?)?;
-    if mode.http2() {
+    if mode.internet_v4() {
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    } else if mode.http2() {
         config.alpn_protocols = vec![b"h2".to_vec()];
     }
     let acceptor = TlsAcceptor::from(Arc::new(config));
