@@ -42,13 +42,18 @@ case "$1" in
     ip link show dev "$WAN" >/dev/null || die "WAN does not exist"
     [[ -z "$(ip -4 -o addr show dev "$TUN")" ]] ||
       die "TUN has an IPv4 address; refusing to modify it"
-    ip -4 route get 1.1.1.1 >/dev/null ||
+    ROUTE="$(ip -4 route get 1.1.1.1)" ||
       die "VPS cannot route a public IPv4 address"
+    [[ " $ROUTE " == *" dev $WAN "* ]] ||
+      die "WAN is not the outgoing interface for public IPv4; check: ip route get 1.1.1.1"
     if ip -4 route show | grep -qE '(^| )10\.77\.0\.0/30( |$)'; then
       die "10.77.0.0/30 route already exists; refusing overlap"
     fi
     ip -4 addr add 10.77.0.1/30 dev "$TUN"
-    rollback() { ip -4 addr del 10.77.0.1/30 dev "$TUN" 2>/dev/null || true; }
+    rollback() {
+      nft delete table ip "$TABLE" 2>/dev/null || true
+      ip -4 addr del 10.77.0.1/30 dev "$TUN" 2>/dev/null || true
+    }
     trap rollback ERR
     # Dedicated nft table only. Existing firewalls can still deny forwarding.
     nft -f /dev/stdin <<EOF
