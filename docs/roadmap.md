@@ -28,7 +28,7 @@
 ## Milestone M2: Linux operational system
 
 - [ ] TUN integration and route/DNS handling for IPv4 and IPv6. *(Experimental Linux TUN now routes IPv4, IPv6, TCP, UDP and synthetic DNS to one exact allowed remote address in a **third isolated namespace**, with tested revocation; host routing, real NAT, automatic DNS policy and production leak controls remain pending.)*
-- [ ] Protection policy and network-failure leak tests. *(A three-namespace fault lab now proves an otherwise-working direct bypass exists, then checks nftables blocks IPv4/IPv6 leaks after an abrupt client crash; raw TLS and genuine HTTP/2 both transfer 192 KiB of synthetic TCP data with 1% packet loss and delay. This is not yet a safe host-wide kill switch, DNS policy or production reconnect strategy.)*
+- [ ] Protection policy and network-failure leak tests. *(A separate Rust **fedup-netguard** helper now installs a create-only atomic nftables table from strict JSON inside an isolated namespace and verifies kernel rule integrity; it blocks real alternate IPv4/IPv6 routes through client crashes, detects unexpected changes and tests explicit removal. Both transports transfer 192 KiB under 1% packet loss and delay. A real host-safe policy daemon, DNS/application split, restart behavior and long-term operation remain pending.)*
 - [ ] Systemd service, DEB and straightforward SSH admin. *(experimental SSH CLI is implemented; packaging, roles and managed enrollment pending)*
 - [ ] Stable config with documented backups and upgrades.
 
