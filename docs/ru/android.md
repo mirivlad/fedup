@@ -1,0 +1,38 @@
+# FedUp для Android — нативная лабораторная оболочка
+
+**Это не работающий VPN и не релиз.** В каталоге android/ появился Kotlin-проект: диагностический экран и правильно объявленный в AndroidManifest.xml VpnService. Сервис пока намеренно немедленно останавливается, **не вызывает Builder.establish()**, не просит доступ к VPN и не заменяет существующую VPN-программу.
+
+Причина: подключение к доверенному серверу, защищённый сокет, регистрация устройства, настройка маршрутов и DNS на Android пока отсутствуют. Создавать TUN и показывать «подключено» было бы опасной имитацией работающего VPN. Поддержка Android Always-on в манифесте явно отключена до готовности транспорта.
+
+## Реальный Rust-мост
+
+Добавлен crate crates/fedup-android. Он использует JNI, экспортирует функции в Kotlin NativePacketPolicy и вызывает **тот же fedup-core**, что и Linux. До копирования пакета из Java проверяется размер (максимум 1280 байт). Проверяются IPv4/IPv6, направление и строго заданные *тестовые* адреса. Ошибка JNI либо отсутствие нативной библиотеки = отказ, не разрешение трафика.
+
+Создан VpnActivationGate с пятью необходимыми условиями: системное разрешение, аутентификация сервера, авторизация устройства, готовность нативной политики и проверка маршрутов/DNS. Kotlin unit-тесты проверяют отказ при отсутствии любого из этих условий. Пока нет реализации самого соединения, эти условия не могут быть выполнены через UI.
+
+## Как собрать
+
+Зависимости: Android SDK 35, NDK 27.2.12479018, JDK 17, Gradle 8.13, Rust Android ARM64 target и cargo-ndk. Команды соответствуют заданию android-lab в .github/workflows/rust.yml:
+
+~~~bash
+rustup target add aarch64-linux-android
+cargo install cargo-ndk --locked
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build --release -p fedup-android
+cd android
+gradle --no-daemon :app:assembleDebug :app:testDebugUnitTest
+~~~
+
+Это **только диагностический debug APK**, подписанный временным отладочным ключом сборочной среды. Он не передаёт VPN-трафик; устанавливать его ради защиты сети бессмысленно.
+
+## Что предстоит
+
+1. Защищённый транспорт и регистрация устройства на Android, неэкспортируемый ключ Android Keystore или криптографически защищённое хранилище.
+2. Правильное пользовательское согласие через VpnService.prepare(), вызов VpnService.protect() для внешнего сокета до сервера.
+3. Ограниченный TUN read/write с проверкой IP через fedup-core; корректные DNS, IPv6, split-tunnel и состояние при отказе соединения.
+4. Android Always-on и Lockdown с проверками в эмуляторе и на настоящем телефоне, включая переключения Wi-Fi/сотовой сети.
+5. Подписанная обновляемая APK-сборка, тест обновлений и восстановление после перезагрузки.
+
+Подробнее о системном API: https://developer.android.com/develop/connectivity/vpn и https://developer.android.com/reference/android/net/VpnService .
+
+Связанные документы: [переносимое ядро](platform-core.md), [дорожная карта](../roadmap.md), [задача #10](https://github.com/mirivlad/fedup/issues/10).
