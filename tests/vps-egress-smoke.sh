@@ -214,6 +214,25 @@ if timeout 6 ip netns exec "$CN" curl -kfsS --noproxy '*' \
 fi
 timeout 6 ip netns exec "$CN" ping -n -c 1 -W 2 9.9.9.9 >/dev/null
 echo "Active anonymous probe denied; authenticated tunnel still routes packets: PASS"
+# Refuse a second simultaneous packet session until a real per-device
+# address allocator and TUN demultiplexer exist. The second connection can
+# authenticate, but must NOT see first device traffic or create another TUN.
+if printf '%s\n' "$PASS" | timeout 8 ip netns exec "$CN" "$TUN" \
+    client-vps-v4 172.31.44.1:7443 futother "$TMP/device" \
+    --passphrase-stdin >"$TMP/second-client.log" 2>&1; then
+  echo "FAIL: a second session reused the shared single-device TUN" >&2
+  exit 1
+fi
+if ! grep -q "HTTP/2 tunnel request rejected by server" "$TMP/second-client.log"; then
+  cat "$TMP/second-client.log" >&2
+  echo "FAIL: second session did not receive an explicit refusal" >&2
+  exit 1
+fi
+if ip -n "$CN" link show futother >/dev/null 2>&1; then
+  echo "FAIL: rejected second session unexpectedly created another TUN" >&2
+  exit 1
+fi
+echo "Concurrent second device session explicitly rejected without TUN creation: PASS"
 # Account disable should close a live tunnel in <= 5 seconds.
 "$USERS" disable "$TMP/users" phone
 sleep 7
