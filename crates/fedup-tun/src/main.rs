@@ -629,7 +629,9 @@ async fn server_session(
         )
         .await;
     }
-    let _active = admission.active.clone()
+    let _active = admission
+        .active
+        .clone()
         .try_acquire_owned()
         .map_err(|_| "another IP session is already using the TUN")?;
     let req = read_frame(&mut tls).await?;
@@ -721,16 +723,8 @@ async fn server(
         let authorization = authorization.clone();
         let admission = admission.clone();
         tokio::spawn(async move {
-            if let Err(error) = server_session(
-                socket,
-                acceptor,
-                tun,
-                &authorization,
-                mode,
-                admission,
-                slot,
-            )
-            .await
+            if let Err(error) =
+                server_session(socket, acceptor, tun, &authorization, mode, admission, slot).await
             {
                 eprintln!("IP session closed: {error}");
             }
