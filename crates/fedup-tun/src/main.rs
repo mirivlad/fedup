@@ -5,16 +5,16 @@
 
 use bytes::Bytes;
 use fedup_identity::{decrypt_pkcs8, device_connection, read_password};
+use fedup_protocol::{encode_header, parse_header, Frame, FrameKind, HEADER_LEN};
 use h2::{client as h2_client, server as h2_server, RecvStream, SendStream};
 use http::{Request, Response, StatusCode};
-use std::future::poll_fn;
-use fedup_protocol::{encode_header, parse_header, Frame, FrameKind, HEADER_LEN};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use sha2::{Digest, Sha256};
 use std::env;
 use std::error::Error;
 use std::fs::{self, File};
+use std::future::poll_fn;
 use std::io::BufReader;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -432,7 +432,9 @@ async fn h2_server_session(
         while let Some(next) = connection.accept().await {
             let (_, mut respond) = next?;
             respond.send_response(
-                Response::builder().status(StatusCode::TOO_MANY_REQUESTS).body(())?,
+                Response::builder()
+                    .status(StatusCode::TOO_MANY_REQUESTS)
+                    .body(())?,
                 true,
             )?;
         }
@@ -539,7 +541,9 @@ async fn server(
     println!("FedUp IP lab server listening on {listen}; one device at a time");
     loop {
         let (socket, _) = listener.accept().await?;
-        if let Err(error) = server_session(socket, acceptor.clone(), tun.clone(), allowlist, http2).await {
+        if let Err(error) =
+            server_session(socket, acceptor.clone(), tun.clone(), allowlist, http2).await
+        {
             eprintln!("IP session closed: {error}");
         }
     }
@@ -604,9 +608,7 @@ async fn main() {
     let args: Vec<String> = env::args().collect();
     let result: Result<()> = async {
         match args.as_slice() {
-            [_, cmd, bind, tun, ca, cert, key, allow]
-                if cmd == "server" || cmd == "server-h2" =>
-            {
+            [_, cmd, bind, tun, ca, cert, key, allow] if cmd == "server" || cmd == "server-h2" => {
                 server(
                     bind.parse()?,
                     tun,
@@ -618,16 +620,27 @@ async fn main() {
                 )
                 .await
             }
-            [_, cmd, addr, tun, device]
-                if cmd == "client" || cmd == "client-h2" =>
-            {
-                client(addr.parse()?, tun, Path::new(device), false, cmd == "client-h2").await
+            [_, cmd, addr, tun, device] if cmd == "client" || cmd == "client-h2" => {
+                client(
+                    addr.parse()?,
+                    tun,
+                    Path::new(device),
+                    false,
+                    cmd == "client-h2",
+                )
+                .await
             }
             [_, cmd, addr, tun, device, flag]
-                if (cmd == "client" || cmd == "client-h2")
-                    && flag == "--passphrase-stdin" =>
+                if (cmd == "client" || cmd == "client-h2") && flag == "--passphrase-stdin" =>
             {
-                client(addr.parse()?, tun, Path::new(device), true, cmd == "client-h2").await
+                client(
+                    addr.parse()?,
+                    tun,
+                    Path::new(device),
+                    true,
+                    cmd == "client-h2",
+                )
+                .await
             }
             _ => {
                 usage();
