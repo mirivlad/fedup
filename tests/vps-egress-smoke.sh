@@ -177,6 +177,23 @@ if timeout 5 ip netns exec "$CN" curl -kfsS --noproxy '*' --http1.1 \
     "https://172.31.44.1:7443/fedup-lab/v1/ip-tunnel" >/dev/null 2>&1; then
   echo "FAIL: anonymous access exposed a protected HTTP endpoint" >&2; exit 1
 fi
+# Two distinct GETs over ONE HTTP/2 connection must both succeed.
+# nghttp is invoked once with two distinct same-origin URLs; its verbose
+# connection count is observed instead of assuming connection reuse.
+timeout 8 ip netns exec "$CN" nghttp -v --no-verify-peer \
+    "https://172.31.44.1:7443/" \
+    "https://172.31.44.1:7443/index.html" >"$TMP/http2-reuse.log" 2>&1 || {
+  cat "$TMP/http2-reuse.log" >&2
+  echo "FAIL: anonymous HTTP/2 multi-request connection broke" >&2
+  exit 1
+}
+if [[ "$(grep -c 'Service is online' "$TMP/http2-reuse.log" || :)" -ne 2 ]] ||
+   [[ "$(grep -c 'Connected' "$TMP/http2-reuse.log" || :)" -ne 1 ]]; then
+  cat "$TMP/http2-reuse.log" >&2
+  echo "FAIL: expected two HTTPS/2 page responses over one TCP/TLS connection" >&2
+  exit 1
+fi
+echo "Passive-compatible HTTP/2: 2 page requests over 1 TLS connection: PASS"
 echo "Anonymous HTTP/1.1 and HTTP/2 web fallback; protected URL denied: PASS"
 echo "Unauthenticated idle TLS socket deliberately held open"
 printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" \

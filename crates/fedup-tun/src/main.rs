@@ -504,6 +504,8 @@ async fn h2_auth_probe(
 const PUBLIC_PAGE: &[u8] = b"<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>Home</title></head><body><main><h1>Welcome</h1><p>Service is online.</p></main></body></html>\n";
 const PUBLIC_NOT_FOUND: &[u8] = b"Not Found\n";
 const PUBLIC_REQUEST_LIMIT: usize = 4096;
+const PUBLIC_MAX_H2_REQUESTS: usize = 16;
+const PUBLIC_H2_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn public_page(method: &str, path: &str) -> (StatusCode, &'static str, &'static [u8]) {
     if method == "GET" && (path == "/" || path == "/index.html") {
@@ -520,22 +522,36 @@ fn public_page(method: &str, path: &str) -> (StatusCode, &'static str, &'static 
 async fn public_https_session(mut tls: tokio_rustls::server::TlsStream<TcpStream>) -> Result<()> {
     if tls.get_ref().1.alpn_protocol() == Some(b"h2".as_slice()) {
         let mut connection = timeout(IO_TIMEOUT, h2_server::handshake(tls)).await??;
-        let (request, mut respond) = timeout(IO_TIMEOUT, connection.accept())
-            .await?
-            .ok_or("anonymous HTTP/2 client closed before request")??;
-        let (status, content_type, body) =
-            public_page(request.method().as_str(), request.uri().path());
-        let mut outgoing = respond.send_response(
-            Response::builder()
-                .status(status)
-                .header(http::header::CONTENT_TYPE, content_type)
-                .header(http::header::CONTENT_LENGTH, body.len().to_string())
-                .body(())?,
-            false,
-        )?;
-        outgoing.send_data(Bytes::from_static(body), true)?;
-        // HTTP/2 HEADERS/DATA must be flushed by driving the state machine.
+        // A public HTTPS/2 origin serves more than one request per TLS
+        // connection. The old single-response close made an active probe
+        // trivially distinguish this fallback from ordinary HTTP/2.
+        // Bound both idle lifetime and total requests from anonymous peers.
+        let mut requests = 0usize;
+        loop {
+            if requests >= PUBLIC_MAX_H2_REQUESTS {
+                break;
+            }
+            let next = timeout(PUBLIC_H2_IDLE_TIMEOUT, connection.accept()).await;
+            let (request, mut respond) = match next {
+                Ok(Some(Ok(pair))) => pair,
+                Ok(None) | Err(_) => break,
+                Ok(Some(Err(err))) => return Err(err.into()),
+            };
+            requests += 1;
+            let (status, content_type, body) =
+                public_page(request.method().as_str(), request.uri().path());
+            let mut outgoing = respond.send_response(
+                Response::builder()
+                    .status(status)
+                    .header(http::header::CONTENT_TYPE, content_type)
+                    .header(http::header::CONTENT_LENGTH, body.len().to_string())
+                    .body(())?,
+                false,
+            )?;
+            outgoing.send_data(Bytes::from_static(body), true)?;
+        }
         connection.graceful_shutdown();
+        // Flush any pending HTTP/2 frames after GOAWAY.
         let _ = timeout(Duration::from_secs(2), connection.accept()).await;
         return Ok(());
     }
