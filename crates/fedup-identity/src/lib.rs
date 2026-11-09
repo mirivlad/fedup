@@ -279,7 +279,7 @@ pub fn import_certificate(
         .next()
         .ok_or("client certificate is missing its subject CN")?
         .data()
-        .to_string();
+        .to_string()?;
     if common_name != format!("fedup-{}", metadata.device) {
         return Err("client certificate identity does not match the invitation device".into());
     }
