@@ -9,7 +9,7 @@ use openssl::pkey::{PKey, Private};
 use openssl::stack::Stack;
 use openssl::symm::Cipher;
 use openssl::x509::store::X509StoreBuilder;
-use openssl::x509::{X509NameBuilder, X509Req, X509StoreContext, X509};
+use openssl::x509::{X509NameBuilder, X509PurposeId, X509Req, X509StoreContext, X509};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::error::Error;
@@ -266,11 +266,23 @@ pub fn import_certificate(
     let cert = X509::from_pem(&read_limited(received_cert, FILE_LIMIT)?)?;
     let mut store_builder = X509StoreBuilder::new()?;
     store_builder.add_cert(ca)?;
+    store_builder.set_purpose(X509PurposeId::SSL_CLIENT)?;
     let store = store_builder.build();
     let chain = Stack::new()?;
     let mut ctx = X509StoreContext::new()?;
     if !ctx.init(&store, &cert, &chain, |c| c.verify_cert())? {
         return Err("certificate chain validation failed".into());
+    }
+    let common_name = cert
+        .subject_name()
+        .entries_by_nid(Nid::COMMONNAME)
+        .next()
+        .ok_or("client certificate is missing its subject CN")?
+        .data()
+        .as_utf8()?
+        .to_string();
+    if common_name != format!("fedup-{}", metadata.device) {
+        return Err("client certificate identity does not match the invitation device".into());
     }
     let private = load_private(&device_dir.join("client-key.enc.pem"), password)?;
     if !cert.public_key()?.public_eq(&private) {
@@ -283,9 +295,12 @@ pub fn import_certificate(
 /// Interactive usage reads directly from a terminal without echo.
 pub fn read_password(confirm: bool, password_stdin: bool) -> IdentityResult<Zeroizing<String>> {
     let first = if password_stdin {
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-        Zeroizing::new(input.trim_end_matches(['\n', '\r']).to_owned())
+        let mut input = Zeroizing::new(String::new());
+        std::io::stdin().read_line(&mut *input)?;
+        while input.ends_with('\n') || input.ends_with('\r') {
+            input.pop();
+        }
+        input
     } else {
         Zeroizing::new(rpassword::prompt_password(
             "Device private-key passphrase: ",
