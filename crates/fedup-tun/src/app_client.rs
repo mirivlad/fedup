@@ -23,7 +23,10 @@ fn headers_for_proof(
     ))
 }
 
-async fn get_challenge(sender: &mut h2_client::SendRequest<Bytes>, hostname: &str) -> Result<String> {
+async fn get_challenge(
+    sender: &mut h2_client::SendRequest<Bytes>,
+    hostname: &str,
+) -> Result<String> {
     *sender = timeout(IO_TIMEOUT, sender.clone().ready()).await??;
     let request = Request::builder()
         .method(http::Method::GET)
@@ -85,15 +88,27 @@ pub(super) async fn connect(
         cert_der,
         private.as_ref(),
         if auth_only { "GET" } else { "POST" },
-        if auth_only { proof::PROBE_PATH } else { proof::TUNNEL_PATH },
+        if auth_only {
+            proof::PROBE_PATH
+        } else {
+            proof::TUNNEL_PATH
+        },
         &nonce,
     )?;
     sender = timeout(IO_TIMEOUT, sender.ready()).await??;
     let mut request = Request::builder()
-        .method(if auth_only { http::Method::GET } else { http::Method::POST })
+        .method(if auth_only {
+            http::Method::GET
+        } else {
+            http::Method::POST
+        })
         .uri(format!(
             "https://{hostname}{}",
-            if auth_only { proof::PROBE_PATH } else { proof::TUNNEL_PATH }
+            if auth_only {
+                proof::PROBE_PATH
+            } else {
+                proof::TUNNEL_PATH
+            }
         ))
         .header(http::header::COOKIE, format!("visitor_session={nonce}"))
         .header("x-device-certificate", cert)
@@ -112,7 +127,10 @@ pub(super) async fn connect(
         return Ok(());
     }
     if response.status() != StatusCode::OK
-        || response.headers().get(http::header::CONTENT_TYPE).is_none_or(|h| h != H2_TYPE)
+        || response
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .is_none_or(|h| h != H2_TYPE)
     {
         return Err("application-authorized packet tunnel rejected".into());
     }

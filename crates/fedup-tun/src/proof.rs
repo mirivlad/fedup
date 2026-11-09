@@ -45,7 +45,10 @@ impl DeviceProof {
 
     pub fn issue(&self) -> Result<String> {
         let now = Instant::now();
-        let mut pending = self.challenges.lock().map_err(|_| "challenge lock poisoned")?;
+        let mut pending = self
+            .challenges
+            .lock()
+            .map_err(|_| "challenge lock poisoned")?;
         pending.retain(|_, issued| now.duration_since(*issued) < CHALLENGE_TTL);
         if pending.len() >= MAX_CHALLENGES {
             return Err("too many outstanding challenges".into());
@@ -75,19 +78,24 @@ impl DeviceProof {
             return Err("invalid device proof fields".into());
         }
         let raw_nonce = URL_SAFE_NO_PAD.decode(encoded_challenge)?;
-        let nonce: [u8; CHALLENGE_BYTES] = raw_nonce
-            .try_into()
-            .map_err(|_| "invalid challenge size")?;
+        let nonce: [u8; CHALLENGE_BYTES] =
+            raw_nonce.try_into().map_err(|_| "invalid challenge size")?;
         let issued = {
-            let mut pending = self.challenges.lock().map_err(|_| "challenge lock poisoned")?;
-            pending.remove(&nonce).ok_or("unknown or consumed challenge")?
+            let mut pending = self
+                .challenges
+                .lock()
+                .map_err(|_| "challenge lock poisoned")?;
+            pending
+                .remove(&nonce)
+                .ok_or("unknown or consumed challenge")?
         };
         if issued.elapsed() >= CHALLENGE_TTL {
             return Err("expired challenge".into());
         }
         let der = URL_SAFE_NO_PAD.decode(encoded_cert)?;
         let sig = URL_SAFE_NO_PAD.decode(encoded_signature)?;
-        if der.is_empty() || der.len() > MAX_CERT_DER || sig.is_empty() || sig.len() > MAX_SIGNATURE {
+        if der.is_empty() || der.len() > MAX_CERT_DER || sig.is_empty() || sig.len() > MAX_SIGNATURE
+        {
             return Err("invalid device certificate or signature size".into());
         }
         let cert = X509::from_der(&der)?;
@@ -134,39 +142,55 @@ mod tests {
         let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
         let ca_key = PKey::from_ec_key(EcKey::generate(&group).unwrap()).unwrap();
         let mut ca_name = X509NameBuilder::new().unwrap();
-        ca_name.append_entry_by_text("CN", "FedUp disposable proof CA").unwrap();
+        ca_name
+            .append_entry_by_text("CN", "FedUp disposable proof CA")
+            .unwrap();
         let ca_name = ca_name.build();
         let mut ca = X509::builder().unwrap();
         ca.set_version(2).unwrap();
         ca.set_subject_name(&ca_name).unwrap();
         ca.set_issuer_name(&ca_name).unwrap();
         ca.set_pubkey(&ca_key).unwrap();
-        ca.set_not_before(Asn1Time::days_from_now(0).unwrap().as_ref()).unwrap();
-        ca.set_not_after(Asn1Time::days_from_now(2).unwrap().as_ref()).unwrap();
+        ca.set_not_before(Asn1Time::days_from_now(0).unwrap().as_ref())
+            .unwrap();
+        ca.set_not_after(Asn1Time::days_from_now(2).unwrap().as_ref())
+            .unwrap();
         let ca_ext = openssl::x509::X509Extension::new_nid(
-            None, None, Nid::BASIC_CONSTRAINTS, "critical,CA:TRUE",
-        ).unwrap();
+            None,
+            None,
+            Nid::BASIC_CONSTRAINTS,
+            "critical,CA:TRUE",
+        )
+        .unwrap();
         ca.append_extension(ca_ext).unwrap();
         ca.sign(&ca_key, MessageDigest::sha256()).unwrap();
         let ca = ca.build();
 
         let device_key = PKey::from_ec_key(EcKey::generate(&group).unwrap()).unwrap();
         let mut device_name = X509NameBuilder::new().unwrap();
-        device_name.append_entry_by_text("CN", "fedup-test-device").unwrap();
+        device_name
+            .append_entry_by_text("CN", "fedup-test-device")
+            .unwrap();
         let device_name = device_name.build();
         let mut leaf = X509::builder().unwrap();
         leaf.set_version(2).unwrap();
         leaf.set_subject_name(&device_name).unwrap();
         leaf.set_issuer_name(&ca_name).unwrap();
         leaf.set_pubkey(&device_key).unwrap();
-        leaf.set_not_before(Asn1Time::days_from_now(0).unwrap().as_ref()).unwrap();
-        leaf.set_not_after(Asn1Time::days_from_now(1).unwrap().as_ref()).unwrap();
-        let usage = openssl::x509::X509Extension::new_nid(
-            None, None, Nid::EXT_KEY_USAGE, "clientAuth",
-        ).unwrap();
+        leaf.set_not_before(Asn1Time::days_from_now(0).unwrap().as_ref())
+            .unwrap();
+        leaf.set_not_after(Asn1Time::days_from_now(1).unwrap().as_ref())
+            .unwrap();
+        let usage =
+            openssl::x509::X509Extension::new_nid(None, None, Nid::EXT_KEY_USAGE, "clientAuth")
+                .unwrap();
         leaf.append_extension(usage).unwrap();
         leaf.sign(&ca_key, MessageDigest::sha256()).unwrap();
-        (ca.to_pem().unwrap(), leaf.build().to_der().unwrap(), device_key)
+        (
+            ca.to_pem().unwrap(),
+            leaf.build().to_der().unwrap(),
+            device_key,
+        )
     }
 
     #[test]
@@ -174,14 +198,24 @@ mod tests {
         let (ca, cert, key) = ca_and_device();
         let state = DeviceProof::new(&ca).unwrap();
         let nonce = state.issue().unwrap();
-        let fp = Sha256::digest(&cert).iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let fp = Sha256::digest(&cert)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
         let payload = message("POST", TUNNEL_PATH, &nonce, &fp);
         let mut signer = Signer::new(MessageDigest::sha256(), &key).unwrap();
         signer.update(payload.as_bytes()).unwrap();
         let signature = URL_SAFE_NO_PAD.encode(signer.sign_to_vec().unwrap());
         let cert_b64 = URL_SAFE_NO_PAD.encode(&cert);
-        assert_eq!(state.verify(&nonce, &cert_b64, &signature, "POST", TUNNEL_PATH).unwrap(), fp);
-        assert!(state.verify(&nonce, &cert_b64, &signature, "POST", TUNNEL_PATH).is_err());
+        assert_eq!(
+            state
+                .verify(&nonce, &cert_b64, &signature, "POST", TUNNEL_PATH)
+                .unwrap(),
+            fp
+        );
+        assert!(state
+            .verify(&nonce, &cert_b64, &signature, "POST", TUNNEL_PATH)
+            .is_err());
     }
 
     #[test]
@@ -189,10 +223,23 @@ mod tests {
         let (ca, cert, key) = ca_and_device();
         let state = DeviceProof::new(&ca).unwrap();
         let nonce = state.issue().unwrap();
-        let fp = Sha256::digest(&cert).iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let fp = Sha256::digest(&cert)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
         let mut signer = Signer::new(MessageDigest::sha256(), &key).unwrap();
-        signer.update(message("GET", PROBE_PATH, &nonce, &fp).as_bytes()).unwrap();
+        signer
+            .update(message("GET", PROBE_PATH, &nonce, &fp).as_bytes())
+            .unwrap();
         let signature = URL_SAFE_NO_PAD.encode(signer.sign_to_vec().unwrap());
-        assert!(state.verify(&nonce, &URL_SAFE_NO_PAD.encode(cert), &signature, "POST", TUNNEL_PATH).is_err());
+        assert!(state
+            .verify(
+                &nonce,
+                &URL_SAFE_NO_PAD.encode(cert),
+                &signature,
+                "POST",
+                TUNNEL_PATH
+            )
+            .is_err());
     }
 }

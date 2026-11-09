@@ -636,7 +636,10 @@ async fn server_session(
         .map_err(|_| "too many established TLS sessions")?;
     drop(handshake_slot);
     if mode.app_proof() {
-        let proof = admission.app_proof.clone().ok_or("missing app proof verifier")?;
+        let proof = admission
+            .app_proof
+            .clone()
+            .ok_or("missing app proof verifier")?;
         return app_tunnel::serve(tls, tun, authorization.clone(), admission, proof).await;
     }
     let peer = tls
@@ -901,7 +904,8 @@ async fn main() {
                 .await
             }
             [_, cmd, bind, tun, ca, cert, key, users, flag]
-                if cmd == "server-vps-proof-v4" && flag == "--unsafe-experimental-public-egress" =>
+                if cmd == "server-vps-proof-v4"
+                    && flag == "--unsafe-experimental-public-egress" =>
             {
                 server(
                     bind.parse()?,
@@ -914,9 +918,7 @@ async fn main() {
                 )
                 .await
             }
-            [_, cmd, addr, tun, device]
-                if cmd == "client-vps-proof-v4" =>
-            {
+            [_, cmd, addr, tun, device] if cmd == "client-vps-proof-v4" => {
                 app_client::connect(addr.parse()?, tun, Path::new(device), false, false).await
             }
             [_, cmd, addr, tun, device, flag]

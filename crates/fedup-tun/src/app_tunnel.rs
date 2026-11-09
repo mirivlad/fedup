@@ -99,9 +99,7 @@ pub(super) async fn serve(
                 while let Some(next) = connection.accept().await {
                     let (_, mut respond) = next?;
                     respond.send_response(
-                        Response::builder()
-                            .status(StatusCode::NOT_FOUND)
-                            .body(())?,
+                        Response::builder().status(StatusCode::NOT_FOUND).body(())?,
                         true,
                     )?;
                 }
