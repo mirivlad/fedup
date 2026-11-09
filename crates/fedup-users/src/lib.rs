@@ -382,6 +382,62 @@ fn unix_seconds() -> Result<i64> {
         .as_secs() as i64)
 }
 
+fn migrate_devices(dir: &Path) -> Result<()> {
+    let db = connection(dir)?;
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS devices (
+            fingerprint TEXT PRIMARY KEY NOT NULL,
+            username TEXT NOT NULL REFERENCES users(username),
+            label TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0,1)),
+            csr_sha256 TEXT,
+            certificate_pem TEXT,
+            UNIQUE(username,label)
+        );
+        CREATE INDEX IF NOT EXISTS devices_by_owner ON devices(username);",
+    )?;
+    let mut columns = Vec::new();
+    let mut statement = db.prepare("PRAGMA table_info(devices)")?;
+    for col in statement.query_map([], |r| r.get::<_, String>(1))? {
+        columns.push(col?);
+    }
+    if !columns.iter().any(|c| c == "csr_sha256") {
+        db.execute_batch("ALTER TABLE devices ADD COLUMN csr_sha256 TEXT;")?;
+    }
+    if !columns.iter().any(|c| c == "certificate_pem") {
+        db.execute_batch("ALTER TABLE devices ADD COLUMN certificate_pem TEXT;")?;
+    }
+    Ok(())
+}
+
+fn list_devices(dir: &Path, username: &str) -> Result<()> {
+    if !valid_username(username) {
+        return Err("invalid username".into());
+    }
+    let db = connection(dir)?;
+    let mut statement = db.prepare(
+        "SELECT fingerprint,label,revision,expires_at,disabled
+         FROM devices WHERE username=?1 ORDER BY label",
+    )?;
+    let items = statement.query_map([username], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, bool>(4)?,
+        ))
+    })?;
+    for item in items {
+        let (fingerprint,label,revision,expires,disabled)=item?;
+        println!("{label}\t{fingerprint}\taccount_revision={revision}\texpires={expires}\t{}",
+                 if disabled {"revoked"} else {"issued"});
+    }
+    Ok(())
+}
+
 fn list(dir: &Path) -> Result<()> {
     let db = connection(dir)?;
     let mut query = db.prepare("SELECT username,disabled FROM users ORDER BY username")?;
@@ -421,6 +477,9 @@ fn usage() {
          fedup-users disable <users-dir> <username>\n\
          fedup-users enable <users-dir> <username>\n\
          fedup-users list <users-dir>\n\
+         fedup-users migrate <users-dir>\n\
+         fedup-users devices <users-dir> <username>\n\
+         fedup-users check-device <users-dir> <cert-sha256>\n\
          fedup-users revoke-device <users-dir> <cert-sha256>\n\
          fedup-users check <users-dir> <username> --password-stdin\n\
          Passwords must NEVER be passed in argv or shell environment variables."
@@ -432,6 +491,16 @@ pub fn run_cli() -> Result<()> {
     match args.as_slice() {
         [_, cmd, dir] if cmd == "init" => init(Path::new(dir)),
         [_, cmd, dir] if cmd == "list" => list(Path::new(dir)),
+        [_, cmd, dir] if cmd == "migrate" => migrate_devices(Path::new(dir)),
+        [_, cmd, dir, username] if cmd == "devices" => list_devices(Path::new(dir), username),
+        [_, cmd, dir, fingerprint] if cmd == "check-device" => {
+            if authorized_device(Path::new(dir), fingerprint)? {
+                println!("device authorized");
+                Ok(())
+            } else {
+                Err("device not authorized".into())
+            }
+        },
         [_, cmd, dir, user, flag] if cmd == "add" && flag == "--password-stdin" => {
             let pass = stdin_password()?;
             add(Path::new(dir), user, &pass)
