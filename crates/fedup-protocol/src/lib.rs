@@ -116,12 +116,16 @@ fn validate(kind: FrameKind, stream_id: u32, payload_len: usize) -> Result<(), P
     Ok(())
 }
 
-/// Read one frame. Header checks happen before any payload allocation.
-/// The caller must set appropriate read and handshake deadlines on network I/O.
-pub fn read_frame<R: Read>(reader: &mut R) -> Result<Frame, ProtocolError> {
-    let mut header = [0_u8; HEADER_LEN];
-    reader.read_exact(&mut header)?;
+/// Validated frame header, usable by synchronous and asynchronous transports.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FrameHeader {
+    pub kind: FrameKind,
+    pub stream_id: u32,
+    pub payload_len: usize,
+}
 
+/// Parse and validate the entire header without allocating any payload memory.
+pub fn parse_header(header: &[u8; HEADER_LEN]) -> Result<FrameHeader, ProtocolError> {
     if header[0] != WIRE_VERSION {
         return Err(ProtocolError::Version(header[0]));
     }
@@ -134,25 +138,42 @@ pub fn read_frame<R: Read>(reader: &mut R) -> Result<Frame, ProtocolError> {
     let payload_len =
         u32::from_be_bytes(header[8..12].try_into().expect("fixed header size")) as usize;
     validate(kind, stream_id, payload_len)?;
-
-    // Length is bounded. This allocation never depends on unchecked input.
-    let mut payload = vec![0; payload_len];
-    reader.read_exact(&mut payload)?;
-    Ok(Frame {
+    Ok(FrameHeader {
         kind,
         stream_id,
-        payload,
+        payload_len,
     })
 }
 
-/// Encode a single bounded frame without intermediate payload copying.
-pub fn write_frame<W: Write>(writer: &mut W, frame: &Frame) -> Result<(), ProtocolError> {
+/// Encode a frame header, rejecting invalid lengths or stream identifiers.
+pub fn encode_header(frame: &Frame) -> Result<[u8; HEADER_LEN], ProtocolError> {
     validate(frame.kind, frame.stream_id, frame.payload.len())?;
     let mut header = [0_u8; HEADER_LEN];
     header[0] = WIRE_VERSION;
     header[1] = frame.kind as u8;
     header[4..8].copy_from_slice(&frame.stream_id.to_be_bytes());
     header[8..12].copy_from_slice(&(frame.payload.len() as u32).to_be_bytes());
+    Ok(header)
+}
+
+/// Read one frame. Header checks happen before any payload allocation.
+/// The caller must set appropriate read and handshake deadlines on network I/O.
+pub fn read_frame<R: Read>(reader: &mut R) -> Result<Frame, ProtocolError> {
+    let mut header = [0_u8; HEADER_LEN];
+    reader.read_exact(&mut header)?;
+    let parsed = parse_header(&header)?;
+    let mut payload = vec![0; parsed.payload_len];
+    reader.read_exact(&mut payload)?;
+    Ok(Frame {
+        kind: parsed.kind,
+        stream_id: parsed.stream_id,
+        payload,
+    })
+}
+
+/// Encode a single bounded frame without intermediate payload copying.
+pub fn write_frame<W: Write>(writer: &mut W, frame: &Frame) -> Result<(), ProtocolError> {
+    let header = encode_header(frame)?;
     writer.write_all(&header)?;
     writer.write_all(&frame.payload)?;
     Ok(())
