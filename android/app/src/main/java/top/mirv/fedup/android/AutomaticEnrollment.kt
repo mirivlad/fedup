@@ -41,7 +41,7 @@ internal class AutomaticEnrollment(private val context: Context) {
             return "Устройство уже зарегистрировано: " + existing.device
         }
         if (existing == null) {
-            val conf = AccountLogin.config(server)
+            val conf = AccountLogin.config(server, user, password)
             // This CA arrives on an authenticated, public-trust HTTPS
             // connection. EnrollmentManager also verifies its DER SHA-256.
             val invitation = JSONObject()
