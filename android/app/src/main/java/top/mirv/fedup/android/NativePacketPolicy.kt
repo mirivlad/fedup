@@ -20,6 +20,7 @@ object NativePacketPolicy {
 
     private external fun nativeBridgeReady(): Boolean
     private external fun nativeAdmit(packet: ByteArray, clientToServer: Boolean): Boolean
+    private external fun nativeAdmitInternetV4(packet: ByteArray, clientToServer: Boolean): Boolean
 
     fun available(): Boolean = loaded && try {
         nativeBridgeReady()
@@ -27,6 +28,17 @@ object NativePacketPolicy {
         false
     } catch (_: SecurityException) {
         false
+    }
+
+    fun admitsInternetV4(packet: ByteArray, clientToServer: Boolean): Boolean {
+        if (!available() || packet.size !in 20..1280) return false
+        return try {
+            nativeAdmitInternetV4(packet, clientToServer)
+        } catch (_: UnsatisfiedLinkError) {
+            false
+        } catch (_: SecurityException) {
+            false
+        }
     }
 
     fun admits(packet: ByteArray, clientToServer: Boolean): Boolean {
