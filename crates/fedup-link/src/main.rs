@@ -356,8 +356,7 @@ async fn main() {
                         encrypted_client_key(Path::new(key), false)?
                     }
                     [encrypted, stdin_flag]
-                        if encrypted == "--encrypted-key"
-                            && stdin_flag == "--passphrase-stdin" =>
+                        if encrypted == "--encrypted-key" && stdin_flag == "--passphrase-stdin" =>
                     {
                         encrypted_client_key(Path::new(key), true)?
                     }
@@ -365,7 +364,9 @@ async fn main() {
                         private_key(Path::new(key))?
                     }
                     _ => {
-                        return Err("specify --encrypted-key or explicit unsafe lab key mode".into());
+                        return Err(
+                            "specify --encrypted-key or explicit unsafe lab key mode".into()
+                        );
                     }
                 };
                 client(
