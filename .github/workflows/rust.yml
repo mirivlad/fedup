@@ -28,3 +28,7 @@ jobs:
         run: cargo build -p fedup-lab
       - name: Exercise lab protocol and certificate verification
         run: bash tests/lab-smoke.sh
+      - name: Build experimental TCP link
+        run: cargo build -p fedup-link
+      - name: Exercise end-to-end link and revocation
+        run: bash tests/link-smoke.sh
