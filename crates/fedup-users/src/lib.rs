@@ -593,23 +593,49 @@ mod tests {
 
     #[test]
     fn issued_cert_retry_is_idempotent_and_old_password_cannot_reenroll() {
-        let dir=isolated();
-        let pass=b"long-password-for-device-issuer";
-        add(&dir,"family",pass).unwrap();
-        let rev=authenticate_revision(&dir,"family",pass).unwrap().unwrap();
-        let fp="af".repeat(32);
-        let csr="9f".repeat(32);
-        let expiry=unix_seconds().unwrap()+3600;
-        let cert="-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----";
-        let first=register_signed_device(&dir,"family",rev,"android-1",&csr,&fp,expiry,cert).unwrap();
-        let second=register_signed_device(&dir,"family",rev,"android-1",&csr,&"b1".repeat(32),expiry,cert).unwrap();
-        assert_eq!(first,second);
-        assert!(authorized_device(&dir,&fp).unwrap());
-        assert!(register_signed_device(&dir,"family",rev,"android-1",&"22".repeat(32),&fp,expiry,cert).is_err());
-        change_password(&dir,"family",b"even-more-secure-new-passphrase").unwrap();
-        assert!(!authorized_device(&dir,&fp).unwrap());
-        assert!(register_signed_device(&dir,"family",rev,"android-2",&csr,&fp,expiry,cert).is_err());
+        let dir = isolated();
+        let pass = b"long-password-for-device-issuer";
+        add(&dir, "family", pass).unwrap();
+        let rev = authenticate_revision(&dir, "family", pass)
+            .unwrap()
+            .unwrap();
+        let fp = "af".repeat(32);
+        let csr = "9f".repeat(32);
+        let expiry = unix_seconds().unwrap() + 3600;
+        let cert = "-----BEGIN CERTIFICATE-----\\ntest\\n-----END CERTIFICATE-----";
+        let first =
+            register_signed_device(&dir, "family", rev, "android-1", &csr, &fp, expiry, cert)
+                .unwrap();
+        let second = register_signed_device(
+            &dir,
+            "family",
+            rev,
+            "android-1",
+            &csr,
+            &"b1".repeat(32),
+            expiry,
+            cert,
+        )
+        .unwrap();
+        assert_eq!(first, second);
+        assert!(authorized_device(&dir, &fp).unwrap());
+        assert!(register_signed_device(
+            &dir,
+            "family",
+            rev,
+            "android-1",
+            &"22".repeat(32),
+            &fp,
+            expiry,
+            cert
+        )
+        .is_err());
+        change_password(&dir, "family", b"even-more-secure-new-passphrase").unwrap();
+        assert!(!authorized_device(&dir, &fp).unwrap());
+        assert!(
+            register_signed_device(&dir, "family", rev, "android-2", &csr, &fp, expiry, cert)
+                .is_err()
+        );
         fs::remove_dir_all(dir).unwrap();
     }
-
 }
