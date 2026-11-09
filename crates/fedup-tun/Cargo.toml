@@ -8,6 +8,7 @@ description = "Single-client Linux IP TUN lab over mTLS; restricted lab subnet o
 
 [dependencies]
 fedup-core = { path = "../fedup-core" }
+fedup-users = { path = "../fedup-users" }
 bytes = "1"
 h2 = "0.4"
 http = "1"
