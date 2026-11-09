@@ -36,3 +36,7 @@ jobs:
         run: cargo build -p fedup-enroll
       - name: Verify one-time CSR certificate issuance and recovery
         run: bash tests/enroll-smoke.sh
+      - name: Build encrypted identity client
+        run: cargo build -p fedup-identity
+      - name: Verify encrypted key creation and end-to-end mTLS
+        run: bash tests/device-smoke.sh
