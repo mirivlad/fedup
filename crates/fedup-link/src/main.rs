@@ -1,6 +1,6 @@
 //! Experimental mTLS TCP link to one operator-configured destination.
 //! NOT a general-purpose VPN, HTTPS service, or DPI evasion system.
-use fedup_identity::{decrypt_pkcs8, read_password};
+use fedup_identity::{decrypt_pkcs8, device_connection, read_password};
 use fedup_protocol::{encode_header, parse_header, Frame, FrameKind, HEADER_LEN};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
@@ -306,7 +306,8 @@ fn usage() {
         "EXPERIMENTAL TCP link, NOT a VPN:\n\
          fedup-link server <listen-ip:port> <loopback-target-ip:port> <ca.pem> <server.pem> <server.key> <allowlist.txt> [--allow-public-bind]\n\
          fedup-link client <loopback-listen-ip:port> <server-ip:port> <server-dns-name> <ca.pem> <client.pem> <encrypted-key.pem> --encrypted-key [--passphrase-stdin]\n\
-         fedup-link client <...> <plaintext-key.pem> --unsafe-lab-plaintext-key (temporary test compatibility)\n\
+         fedup-link client <...> <plaintext-key.pem> --unsafe-lab-plaintext-key (temporary test compatibility)\n\\
+         fedup-link client-device <local-ip:port> <server-ip:port> <device-dir> [--passphrase-stdin]\n\
          fedup-link fingerprint <client.pem>\n\
          Both sides require operator-controlled certificates; the allowlist contains one SHA-256 certificate fingerprint per line."
     );
@@ -345,6 +346,24 @@ async fn main() {
                     Path::new(key),
                     PathBuf::from(allowlist),
                     true,
+                )
+                .await
+            }
+            [_, action, bind, server_addr, dir, flag @ ..] if action == "client-device" => {
+                let password_stdin = match flag {
+                    [] => false,
+                    [stdin_flag] if stdin_flag == "--passphrase-stdin" => true,
+                    _ => return Err("invalid client-device argument".into()),
+                };
+                let device = device_connection(Path::new(dir))?;
+                let key = encrypted_client_key(&device.encrypted_key_path, password_stdin)?;
+                client(
+                    bind.parse()?,
+                    server_addr.parse()?,
+                    device.server_name,
+                    &device.ca_path,
+                    &device.cert_path,
+                    key,
                 )
                 .await
             }
