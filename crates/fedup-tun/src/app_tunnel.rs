@@ -4,16 +4,16 @@
 use super::*;
 use http::header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, SET_COOKIE};
 
-pub(super) async fn serve(
-    tls: tokio_rustls::server::TlsStream<TcpStream>,
+pub(super) async fn serve<T>(
+    tls: T,
     tun: Arc<Tun>,
     authorization: DeviceAuthorization,
     admission: Arc<SessionAdmission>,
     state: Arc<proof::DeviceProof>,
-) -> Result<()> {
-    if tls.get_ref().1.alpn_protocol() != Some(b"h2".as_slice()) {
-        return public_https_session(tls).await;
-    }
+) -> Result<()>
+where
+    T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let mut connection = timeout(IO_TIMEOUT, h2_server::handshake(tls)).await??;
     for _ in 0..PUBLIC_MAX_H2_REQUESTS {
         let Some(next) = timeout(PUBLIC_H2_IDLE_TIMEOUT, connection.accept()).await? else {

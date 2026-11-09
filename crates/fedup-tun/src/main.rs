@@ -59,6 +59,7 @@ enum ServerMode {
     LabH2,
     InternetV4H2,
     InternetV4AppProof,
+    InternetV4AppProofH2c,
 }
 
 impl ServerMode {
@@ -67,11 +68,15 @@ impl ServerMode {
     }
 
     fn internet_v4(self) -> bool {
-        matches!(self, Self::InternetV4H2 | Self::InternetV4AppProof)
+        matches!(self, Self::InternetV4H2 | Self::InternetV4AppProof | Self::InternetV4AppProofH2c)
     }
 
     fn app_proof(self) -> bool {
-        self == Self::InternetV4AppProof
+        matches!(self, Self::InternetV4AppProof | Self::InternetV4AppProofH2c)
+    }
+
+    fn h2c(self) -> bool {
+        self == Self::InternetV4AppProofH2c
     }
 }
 
@@ -636,6 +641,9 @@ async fn server_session(
         .map_err(|_| "too many established TLS sessions")?;
     drop(handshake_slot);
     if mode.app_proof() {
+        if tls.get_ref().1.alpn_protocol() != Some(b"h2".as_slice()) {
+            return public_https_session(tls).await;
+        }
         let proof = admission
             .app_proof
             .clone()
@@ -696,6 +704,9 @@ async fn server(
         if !listen.is_ipv4() {
             return Err("VPS IPv4 server needs an IPv4 listener".into());
         }
+        if mode.h2c() && !listen.ip().is_loopback() {
+            return Err("h2c proof backend must bind IPv4 loopback only".into());
+        }
     } else {
         require_isolated_network_namespace()?;
         if !private_lab_ip(listen) {
@@ -724,23 +735,26 @@ async fn server(
     } else {
         verifier
     };
-    let tls_builder = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13]);
-    let mut config = if mode.app_proof() {
-        // Ordinary browser TLS: never request a client cert in this mode.
-        tls_builder
-            .with_no_client_auth()
-            .with_single_cert(ca_certs(certificate)?, load_key(key)?)?
+    // Caddy terminates public TLS on 443 and uses h2c ONLY over loopback.
+    // All device authorization is still verified here, not in proxy headers.
+    let acceptor = if mode.h2c() {
+        None
     } else {
-        tls_builder
-            .with_client_cert_verifier(verifier.build()?)
-            .with_single_cert(ca_certs(certificate)?, load_key(key)?)?
+        let tls_builder = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13]);
+        let mut config = if mode.app_proof() {
+            tls_builder.with_no_client_auth()
+                .with_single_cert(ca_certs(certificate)?, load_key(key)?)?
+        } else {
+            tls_builder.with_client_cert_verifier(verifier.build()?)
+                .with_single_cert(ca_certs(certificate)?, load_key(key)?)?
+        };
+        if mode.internet_v4() {
+            config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        } else if mode.http2() {
+            config.alpn_protocols = vec![b"h2".to_vec()];
+        }
+        Some(TlsAcceptor::from(Arc::new(config)))
     };
-    if mode.internet_v4() {
-        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-    } else if mode.http2() {
-        config.alpn_protocols = vec![b"h2".to_vec()];
-    }
-    let acceptor = TlsAcceptor::from(Arc::new(config));
     let tun = create_tun(name)?;
     let listener = TcpListener::bind(listen).await?;
     // Bound work before authentication; an incomplete ClientHello now stalls
@@ -776,9 +790,26 @@ async fn server(
         let authorization = authorization.clone();
         let admission = admission.clone();
         tokio::spawn(async move {
-            if let Err(error) =
+            let result = if let Some(acceptor) = acceptor {
                 server_session(socket, acceptor, tun, &authorization, mode, admission, slot).await
-            {
+            } else {
+                // The raw socket is not Internet-facing; only Caddy's
+                // loopback h2c transport may reach this listener.
+                let _established = admission.established.clone().try_acquire_owned();
+                drop(slot);
+                match _established {
+                    Ok(_permit) => {
+                        match admission.app_proof.clone() {
+                            Some(proof) => app_tunnel::serve(
+                                socket, tun, authorization, admission, proof,
+                            ).await,
+                            None => Err("h2c backend without device proof".into()),
+                        }
+                    }
+                    Err(_) => Err("too many established upstream sessions".into()),
+                }
+            };
+            if let Err(error) = result {
                 eprintln!("IP session closed: {error}");
             }
         });
@@ -840,6 +871,7 @@ fedup-tun server-h2 <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <s
 fedup-tun server-h2-accounts <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <users-dir>
 fedup-tun server-vps-v4 <listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <users-dir> --unsafe-experimental-public-egress
 fedup-tun server-vps-proof-v4 <listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <users-dir> --unsafe-experimental-public-egress
+fedup-tun server-vps-proof-h2c <127.0.0.1:port> <tun-name> <device-ca.pem> <users-dir> --behind-trusted-https-proxy
 fedup-tun client-h2 <private-server-ip:port> <tun-name> <enrolled-device-dir> [--passphrase-stdin]
 fedup-tun probe-h2 <private-server-ip:port> <enrolled-device-dir> [--passphrase-stdin]
 fedup-tun client-vps-v4 <private-test-server-ip:port> <tun-name> <device-dir> [--passphrase-stdin]
@@ -902,6 +934,19 @@ async fn main() {
                     ServerMode::InternetV4H2,
                 )
                 .await
+            }
+            [_, cmd, bind, tun, ca, users, flag]
+                if cmd == "server-vps-proof-h2c" && flag == "--behind-trusted-https-proxy" =>
+            {
+                server(
+                    bind.parse()?,
+                    tun,
+                    Path::new(ca),
+                    Path::new(""),
+                    Path::new(""),
+                    DeviceAuthorization::AccountDatabase(PathBuf::from(users)),
+                    ServerMode::InternetV4AppProofH2c,
+                ).await
             }
             [_, cmd, bind, tun, ca, cert, key, users, flag]
                 if cmd == "server-vps-proof-v4"
