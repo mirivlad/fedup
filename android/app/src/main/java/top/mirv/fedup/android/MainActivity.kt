@@ -122,10 +122,11 @@ class MainActivity : Activity() {
         }
         layout.addView(password, ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT)
-        action(layout, "Войти и зарегистрировать телефон") {
+        action(layout, "Подключиться") {
             val host = server.text.toString().trim()
             val username = login.text.toString().trim()
-            val secret = password.text.toString()
+            val secret = if (password.text.isNotEmpty()) password.text.toString()
+                else CredentialsVault(this).read()
             require(secret.isNotBlank()) { "Введите пароль" }
             password.text.clear()
             message("Проверка учётной записи по HTTPS...")
@@ -139,8 +140,8 @@ class MainActivity : Activity() {
                     prefs.edit().putString("server", host)
                         .putString("username", username).apply()
                     runOnUiThread {
-                        message(result + "\nМожно проверить IPv4 через VPS кнопкой ниже. " +
-                            "IPv6 пока заблокирован; полноценные тесты защиты ещё не пройдены.")
+                        message(result + "\nЗапрашиваем разрешение на IPv4 VPN...")
+                        askVpsConnection(host)
                     }
                 } catch (error: Exception) {
                     runOnUiThread {
@@ -150,53 +151,6 @@ class MainActivity : Activity() {
             }.start()
         }
 
-        action(layout, "Подключиться к VPS (IPv4 + DNS, эксперимент)") {
-            require(enrollment.device()?.enrolled == true) {
-                "Сначала войдите и зарегистрируйте устройство"
-            }
-            require(NativePacketPolicy.available()) {
-                "Rust-проверка пакетов недоступна"
-            }
-            val savedHost = prefs.getString("server", null)
-                ?: error("Укажите сервер и сначала войдите")
-            message("Определение IPv4 адреса VPS...")
-            Thread {
-                try {
-                    // Resolve BEFORE establishing the TUN; protect() then
-                    // ensures the real TLS socket never routes through itself.
-                    val hostname = AccountLogin.endpoint(savedHost).host
-                    val ipv4 = InetAddress.getAllByName(hostname)
-                        .filterIsInstance<Inet4Address>().firstOrNull()
-                        ?: error("У сервера нет доступного IPv4 DNS A-записи")
-                    val address = ipv4.hostAddress + ":7443"
-                    runOnUiThread {
-                        AlertDialog.Builder(this)
-                            .setTitle("Экспериментальный IPv4 VPN")
-                            .setMessage(
-                                "Подключение к " + address + ". Android заменит текущий VPN. " +
-                                    "IPv4 и системный DNS будут направлены через FedUp. " +
-                                    "IPv6 намеренно блокируется. Пока не испытана защита при " +
-                                    "сбоях, НЕ используйте для конфиденциального трафика. " +
-                                    "Продолжить?"
-                            )
-                            .setNegativeButton("Отмена", null)
-                            .setPositiveButton("Подключить") { _, _ ->
-                                pendingLabEndpoint = address
-                                pendingVpsV4 = true
-                                val permission = VpnService.prepare(this)
-                                if (permission == null) {
-                                    startTunnel(address, true)
-                                } else {
-                                    startActivityForResult(permission, VPN_PERMISSION)
-                                }
-                            }
-                            .show()
-                    }
-                } catch (error: Exception) {
-                    runOnUiThread { message("Нет подключения к серверу: " + error.message) }
-                }
-            }.start()
-        }
         action(layout, "Отключиться") {
             startService(Intent(this, FedUpVpnService::class.java)
                 .setAction(FedUpVpnService.STOP))
@@ -323,6 +277,46 @@ class MainActivity : Activity() {
         }
         setContentView(ScrollView(this).apply { addView(layout) })
         showDeviceState()
+    }
+
+    private fun askVpsConnection(savedHost: String) {
+            message("Определение IPv4 адреса VPS...")
+            Thread {
+                try {
+                    // Resolve BEFORE establishing the TUN; protect() then
+                    // ensures the real TLS socket never routes through itself.
+                    val hostname = AccountLogin.endpoint(savedHost).host
+                    val ipv4 = InetAddress.getAllByName(hostname)
+                        .filterIsInstance<Inet4Address>().firstOrNull()
+                        ?: error("У сервера нет доступного IPv4 DNS A-записи")
+                    val address = ipv4.hostAddress + ":7443"
+                    runOnUiThread {
+                        AlertDialog.Builder(this)
+                            .setTitle("Экспериментальный IPv4 VPN")
+                            .setMessage(
+                                "Подключение к " + address + ". Android заменит текущий VPN. " +
+                                    "IPv4 и системный DNS будут направлены через FedUp. " +
+                                    "IPv6 намеренно блокируется. Пока не испытана защита при " +
+                                    "сбоях, НЕ используйте для конфиденциального трафика. " +
+                                    "Продолжить?"
+                            )
+                            .setNegativeButton("Отмена", null)
+                            .setPositiveButton("Подключить") { _, _ ->
+                                pendingLabEndpoint = address
+                                pendingVpsV4 = true
+                                val permission = VpnService.prepare(this)
+                                if (permission == null) {
+                                    startTunnel(address, true)
+                                } else {
+                                    startActivityForResult(permission, VPN_PERMISSION)
+                                }
+                            }
+                            .show()
+                    }
+                } catch (error: Exception) {
+                    runOnUiThread { message("Нет подключения к серверу: " + error.message) }
+                }
+            }.start()
     }
 
     private fun startTunnel(address: String, internetV4: Boolean) {
