@@ -86,6 +86,27 @@ For the new independent firewall-policy helper, see [Russian operator guide](doc
 
 For parser fuzzing, install cargo-fuzz and run `cargo fuzz run frame_parser` from the `fuzz/` directory. See [fail-closed lab and network faults (Russian)](docs/ru/fault-testing.md), [network fault lab (English)](docs/fault-testing.md), [genuine HTTP/2 research (Russian)](docs/ru/http2.md), [HTTP/2 operator reference](docs/http2.md), [IP tunnel + DPI research (Russian)](docs/ru/tun.md), [network observability](docs/tun.md), [encrypted Linux identity (Russian)](docs/ru/device.md), [device identity reference](docs/device.md), [offline enrollment (Russian)](docs/ru/enrollment.md), [offline enrollment reference](docs/enrollment.md), [SSH device administration (Russian)](docs/ru/admin.md), [admin reference](docs/admin.md), [lab instructions (Russian)](docs/ru/lab.md), [TCP link instructions (Russian)](docs/ru/tcp-link.md), [link design & limitations](docs/tcp-link.md) and [experimental wire framing](docs/protocol-v1.md).
 
+## Experimental Android → VPS → public IPv4 proof-of-concept
+
+An explicit **`server-vps-v4`** mode now forwards one phone's validated IPv4
+packets through mutual-TLS HTTP/2 and a separately opted-in nftables SNAT helper
+(`scripts/vps-egress-v4.sh`). Android's main **Connect** button handles
+username/password, automatic device certificate issuance, system VPN consent
+and the IPv4 TUN with DNS. IPv6 is captured and intentionally rejected, not
+tunneled. The VPS Linux namespace CI confirms HTTP, ICMP, UDP/53 and that
+the synthetic Internet sees the gateway WAN address, not the private phone IP.
+
+**Not accepted on a real phone or public VPS yet.** The first-use issuer
+currently requires an **unsafe disposable CA**; there is no production
+delegated issuer, certificate renewal, durable APK signature, verified Android
+Always-on/Lockdown or recovery, multi-device IP allocation, IPv6 service
+or demonstrated DPI resistance. Do not treat it as a privacy-protecting VPN.
+
+For a strictly disposable VPS with its own public IPv4 and HTTPS domain,
+see [the Russian first-connection runbook](docs/ru/vps-first-ipv4.md).
+The acceptance criterion is a real Android browser showing the VPS public
+IPv4 when visiting an external IP-check site; CI alone does not satisfy it.
+
 ## Read the design
 
 - [Project overview in Russian / О проекте по-русски](docs/ru/README.md)
