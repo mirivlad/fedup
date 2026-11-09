@@ -36,6 +36,7 @@ class MainActivity : Activity() {
     private val enrollment by lazy { EnrollmentManager(this) }
     private var pendingLabEndpoint: String? = null
     private var pendingVpsV4 = false
+    private var pendingAppProof = false
     private lateinit var status: TextView
     private lateinit var invitation: EditText
     private lateinit var certificate: EditText
@@ -258,6 +259,7 @@ class MainActivity : Activity() {
                 .setPositiveButton("Продолжить") { _, _ ->
                     pendingLabEndpoint = address
                     pendingVpsV4 = false
+                    pendingAppProof = false
                     val permission = VpnService.prepare(this)
                     if (permission == null) startTunnel(address, false)
                     else startActivityForResult(permission, VPN_PERMISSION)
@@ -285,16 +287,27 @@ class MainActivity : Activity() {
                 try {
                     // Resolve BEFORE establishing the TUN; protect() then
                     // ensures the real TLS socket never routes through itself.
+                    val username = getSharedPreferences("fedup_account", MODE_PRIVATE)
+                        .getString("username", null) ?: error("Не сохранён пользователь")
+                    val secret = CredentialsVault(this).read()
+                    val options = AccountLogin.config(savedHost, username, secret)
+                    val appProof = options.transport == "app-proof"
+                    require(!appProof || options.tunnelPort == 443) {
+                        "Для нового транспорта нужен стандартный HTTPS TCP 443"
+                    }
                     val hostname = AccountLogin.endpoint(savedHost).host
                     val ipv4 = InetAddress.getAllByName(hostname)
                         .filterIsInstance<Inet4Address>().firstOrNull()
                         ?: error("У сервера нет доступного IPv4 DNS A-записи")
-                    val address = ipv4.hostAddress + ":7443"
+                    val address = ipv4.hostAddress + ":" + options.tunnelPort
                     runOnUiThread {
                         AlertDialog.Builder(this)
                             .setTitle("Экспериментальный IPv4 VPN")
                             .setMessage(
-                                "Подключение к " + address + ". Android заменит текущий VPN. " +
+                                "Подключение к " + address +
+                                    (if (appProof) " через обычный HTTPS/2 с подписью устройства. "
+                                    else " через экспериментальный mTLS. ") +
+                                    "Android заменит текущий VPN. " +
                                     "IPv4 и системный DNS будут направлены через FedUp. " +
                                     "IPv6 намеренно блокируется. Пока не испытана защита при " +
                                     "сбоях, НЕ используйте для конфиденциального трафика. " +
@@ -304,9 +317,10 @@ class MainActivity : Activity() {
                             .setPositiveButton("Подключить") { _, _ ->
                                 pendingLabEndpoint = address
                                 pendingVpsV4 = true
+                                pendingAppProof = appProof
                                 val permission = VpnService.prepare(this)
                                 if (permission == null) {
-                                    startTunnel(address, true)
+                                    startTunnel(address, true, appProof)
                                 } else {
                                     startActivityForResult(permission, VPN_PERMISSION)
                                 }
@@ -319,10 +333,13 @@ class MainActivity : Activity() {
             }.start()
     }
 
-    private fun startTunnel(address: String, internetV4: Boolean) {
+    private fun startTunnel(address: String, internetV4: Boolean, appProof: Boolean = false) {
         val command = Intent(this, FedUpVpnService::class.java)
-            .setAction(if (internetV4) FedUpVpnService.START_VPS_V4
-                else FedUpVpnService.START)
+            .setAction(when {
+                appProof && internetV4 -> FedUpVpnService.START_PROOF_V4
+                internetV4 -> FedUpVpnService.START_VPS_V4
+                else -> FedUpVpnService.START
+            })
             .putExtra(FedUpVpnService.ENDPOINT, address)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(command)
@@ -364,9 +381,11 @@ class MainActivity : Activity() {
             val address = pendingLabEndpoint
             pendingLabEndpoint = null
             val vps = pendingVpsV4
+            val proof = pendingAppProof
             pendingVpsV4 = false
+            pendingAppProof = false
             if (resultCode == RESULT_OK && address != null) {
-                startTunnel(address, vps)
+                startTunnel(address, vps, proof)
             } else {
                 message("Разрешение VPN не предоставлено: подключение отменено.")
             }
