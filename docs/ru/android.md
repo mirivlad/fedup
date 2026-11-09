@@ -36,3 +36,7 @@ gradle --no-daemon :app:assembleDebug :app:testDebugUnitTest
 Подробнее о системном API: https://developer.android.com/develop/connectivity/vpn и https://developer.android.com/reference/android/net/VpnService .
 
 Связанные документы: [переносимое ядро](platform-core.md), [дорожная карта](../roadmap.md), [задача #10](https://github.com/mirivlad/fedup/issues/10).
+
+## Новый основной сценарий входа
+
+Появились [пользователи и пароли](accounts.md): теперь основной экран содержит адрес сервера, логин и пароль. Проверка идёт только по HTTPS; после успешного входа пароль сохраняется под ключом Android Keystore, а ручные приглашения и CSR скрыты в расширенной диагностике. **Это пока проверка учётной записи, а не автоматическая регистрация телефона и не полноценное VPN-подключение.**

@@ -4,6 +4,16 @@
 
 > Status: **experimental routed Linux IPv4/IPv6 TUN over raw TLS or genuine HTTP/2, with encrypted device identities**. The Rust framing codec, one-shot mTLS lab, fixed-destination TCP forwarder, SSH-first device admin, offline invitation issuer and encrypted Linux device identity are NOT a VPN or production-ready network service. Do not rely on this project for anonymity or security-critical connectivity.
 
+## Simple account login (first stage)
+
+FedUp now has an experimental SSH-first user administration CLI and a loopback-only
+password authentication API for a trusted HTTPS reverse proxy. The Android primary
+screen asks for **server, username and password**; its remembered password is encrypted
+under Android Keystore AES-GCM. Manual certificate enrollment is hidden in advanced
+diagnostics. A successful login currently **checks account credentials only**, not VPN
+connectivity. Automatic device enrollment and account-bound revocation are still required.
+See [Russian account guide](docs/ru/accounts.md) and [English account guide](docs/accounts.md).
+
 ## Goals
 
 - **Privacy and security:** authenticated sessions, vetted cryptographic primitives, per-device credentials, revocation, minimal metadata retention.
@@ -57,6 +67,8 @@ sudo env FEDUP_TUN_TRANSPORT=raw FEDUP_TUN_FAULT=1 bash tests/tun-smoke.sh
 sudo env FEDUP_TUN_TRANSPORT=h2 FEDUP_TUN_FAULT=1 bash tests/tun-smoke.sh
 # Loopback HTTP/2 + mTLS streaming fixture:
 bash tests/h2-smoke.sh
+# Login, password reset and disable checks in a disposable account database:
+bash tests/users-smoke.sh
 # Pure Python safety tests for repeated PCAP reports:
 python3 tools/test-traffic-study.py
 ```

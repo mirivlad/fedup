@@ -34,6 +34,17 @@
 
 **Exit:** usable and demonstrably fail-closed on a Linux test host.
 
+## Account onboarding usability (in progress)
+
+- [x] SSH-first named accounts using salted Argon2id, user disable/enable, password rotation, private SQLite state.
+- [x] Local-only, rate-limited password validation API designed for a verified HTTPS reverse proxy.
+- [x] Android primary server/login/password screen, HTTPS-only authentication, encrypted remembered password using Android Keystore AES-GCM.
+- [ ] **Automatic first-login enrollment:** generate phone key, authorize by account, issue certificate via a protected delegated issuer, persist per-device record and enforce live revocation; remove manual CSR/PEM steps from user journey.
+- [ ] Real server Android test: connection, IP routing, DNS/IPv6, background resume, emergency recovery, application upgrades.
+- [ ] Revoke all device sessions on user disable and password reset, not just future password checks.
+
+**Current result:** HTTP 204 checks account credentials only. VPN data-plane still expects a device certificate and is not unlocked by password login.
+
 ## Milestone M3: Android client
 
 - [ ] Kotlin `VpnService` bridge to shared Rust core. *(A diagnostic Kotlin VpnService declaration and Rust arm64 JNI bridge now use the shared `fedup-core` packet admission; Android Gradle/NDK CI checks these pieces, but **no authenticated transport, TUN forwarding or functional VPN exists**. Always-on is deliberately disabled.)*
