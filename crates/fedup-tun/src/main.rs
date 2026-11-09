@@ -53,7 +53,6 @@ impl ServerMode {
     }
 }
 
-
 fn ca_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
     let mut reader = BufReader::new(File::open(path)?);
     let chain = rustls_pemfile::certs(&mut reader).collect::<std::io::Result<Vec<_>>>()?;
@@ -486,13 +485,7 @@ async fn server_session(
         return Err("device not authorized".into());
     }
     if mode.http2() {
-        return h2_server_session(
-            tls,
-            tun,
-            (authorization.clone(), fp),
-            mode.internet_v4(),
-        )
-        .await;
+        return h2_server_session(tls, tun, (authorization.clone(), fp), mode.internet_v4()).await;
     }
     let req = read_frame(&mut tls).await?;
     expect_open(req)?;
@@ -545,8 +538,14 @@ async fn server(
     let acceptor = TlsAcceptor::from(Arc::new(config));
     let tun = create_tun(name)?;
     let listener = TcpListener::bind(listen).await?;
-    println!("FedUp {} server listening on {listen}; one device at a time",
-        if mode.internet_v4() { "experimental VPS IPv4" } else { "isolated lab" });
+    println!(
+        "FedUp {} server listening on {listen}; one device at a time",
+        if mode.internet_v4() {
+            "experimental VPS IPv4"
+        } else {
+            "isolated lab"
+        }
+    );
     loop {
         let (socket, _) = listener.accept().await?;
         if let Err(error) =
@@ -659,8 +658,7 @@ async fn main() {
                 .await
             }
             [_, cmd, bind, tun, ca, cert, key, users, flag]
-                if cmd == "server-vps-v4"
-                    && flag == "--unsafe-experimental-public-egress" =>
+                if cmd == "server-vps-v4" && flag == "--unsafe-experimental-public-egress" =>
             {
                 server(
                     bind.parse()?,
@@ -674,12 +672,30 @@ async fn main() {
                 .await
             }
             [_, cmd, addr, tun, device] if cmd == "client-vps-v4" => {
-                client(addr.parse()?, tun, Path::new(device), false, true, false, true).await
+                client(
+                    addr.parse()?,
+                    tun,
+                    Path::new(device),
+                    false,
+                    true,
+                    false,
+                    true,
+                )
+                .await
             }
             [_, cmd, addr, tun, device, flag]
                 if cmd == "client-vps-v4" && flag == "--passphrase-stdin" =>
             {
-                client(addr.parse()?, tun, Path::new(device), true, true, false, true).await
+                client(
+                    addr.parse()?,
+                    tun,
+                    Path::new(device),
+                    true,
+                    true,
+                    false,
+                    true,
+                )
+                .await
             }
             [_, cmd, addr, tun, device] if cmd == "client" || cmd == "client-h2" => {
                 client(
@@ -708,10 +724,28 @@ async fn main() {
                 .await
             }
             [_, cmd, addr, device] if cmd == "probe-h2" => {
-                client(addr.parse()?, "", Path::new(device), false, true, true, false).await
+                client(
+                    addr.parse()?,
+                    "",
+                    Path::new(device),
+                    false,
+                    true,
+                    true,
+                    false,
+                )
+                .await
             }
             [_, cmd, addr, device, flag] if cmd == "probe-h2" && flag == "--passphrase-stdin" => {
-                client(addr.parse()?, "", Path::new(device), true, true, true, false).await
+                client(
+                    addr.parse()?,
+                    "",
+                    Path::new(device),
+                    true,
+                    true,
+                    true,
+                    false,
+                )
+                .await
             }
             _ => {
                 usage();
