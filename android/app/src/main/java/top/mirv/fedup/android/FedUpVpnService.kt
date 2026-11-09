@@ -19,6 +19,7 @@ class FedUpVpnService : VpnService() {
     companion object {
         const val START = "top.mirv.fedup.android.START_LAB"
         const val START_VPS_V4 = "top.mirv.fedup.android.START_VPS_IPV4"
+        const val START_PROOF_V4 = "top.mirv.fedup.android.START_PROOF_IPV4"
         const val STOP = "top.mirv.fedup.android.STOP_LAB"
         const val ENDPOINT = "fedup.endpoint"
         private const val NOTIFICATION_ID = 42
@@ -34,7 +35,7 @@ class FedUpVpnService : VpnService() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if ((intent?.action != START && intent?.action != START_VPS_V4)
+        if ((intent?.action != START && intent?.action != START_VPS_V4 && intent?.action != START_PROOF_V4)
             || session != null) {
             if (session == null) stopSelf(startId)
             return START_NOT_STICKY
@@ -51,15 +52,16 @@ class FedUpVpnService : VpnService() {
         }
         try {
             TlsProbe.Endpoint.parse(endpoint)
-            showNotification(false, intent.action == START_VPS_V4)
+            showNotification(false, intent.action == START_VPS_V4 || intent.action == START_PROOF_V4)
         } catch (_: Exception) {
             stopSelf(startId)
             return START_NOT_STICKY
         }
 
-        val internetV4 = intent.action == START_VPS_V4
+        val internetV4 = intent.action == START_VPS_V4 || intent.action == START_PROOF_V4
+        val appProof = intent.action == START_PROOF_V4
         val newSession = LabTunnelSession(
-            this, EnrollmentManager(this), endpoint, internetV4
+            this, EnrollmentManager(this), endpoint, internetV4, appProof
         ) {
             showNotification(true, internetV4)
         }
