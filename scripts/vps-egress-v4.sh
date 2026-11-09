@@ -4,7 +4,7 @@ set -Eeuo pipefail
 TABLE=fedup_v4
 STATE="${FEDUP_EGRESS_STATE:-/run/fedup-vps-v4.state}"
 # Test-only override permits network-namespace CI without touching /run.
-[[ "$STATE" = /* && "$STATE" != *
+[[ "$STATE" == /* ]] || die "state path must be absolute"
 usage() {
   cat >&2 <<'USAGE'
 sudo bash scripts/vps-egress-v4.sh install <tun> <wan> --acknowledge-host-network-changes
