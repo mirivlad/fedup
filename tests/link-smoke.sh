@@ -93,11 +93,11 @@ fi
   >"$TEMP/server.log" 2>&1 &
 PIDS="$PIDS $!"
 "$LINK" client "127.0.0.1:$CLIENT_PORT" "127.0.0.1:$SERVER_PORT" localhost \
-  "$TEMP/ca.pem" "$TEMP/client.pem" "$TEMP/client.key" \
+  "$TEMP/ca.pem" "$TEMP/client.pem" "$TEMP/client.key" --unsafe-lab-plaintext-key \
   >"$TEMP/client.log" 2>&1 &
 PIDS="$PIDS $!"
 "$LINK" client "127.0.0.1:$DENY_PORT" "127.0.0.1:$SERVER_PORT" localhost \
-  "$TEMP/ca.pem" "$TEMP/unauthorized.pem" "$TEMP/unauthorized.key" \
+  "$TEMP/ca.pem" "$TEMP/unauthorized.pem" "$TEMP/unauthorized.key" --unsafe-lab-plaintext-key \
   >"$TEMP/unauthorized.log" 2>&1 &
 PIDS="$PIDS $!"
 sleep 0.8
