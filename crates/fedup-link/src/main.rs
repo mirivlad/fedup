@@ -1,7 +1,8 @@
 //! Experimental mTLS TCP link to one operator-configured destination.
 //! NOT a general-purpose VPN, HTTPS service, or DPI evasion system.
+use fedup_identity::{decrypt_pkcs8, read_password};
 use fedup_protocol::{encode_header, parse_header, Frame, FrameKind, HEADER_LEN};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use sha2::{Digest, Sha256};
 use std::env;
@@ -39,6 +40,14 @@ fn certs(path: &Path) -> LinkResult<Vec<CertificateDer<'static>>> {
 fn private_key(path: &Path) -> LinkResult<PrivateKeyDer<'static>> {
     let mut reader = BufReader::new(File::open(path)?);
     Ok(rustls_pemfile::private_key(&mut reader)?.ok_or("private key not found")?)
+}
+
+fn encrypted_client_key(path: &Path, password_stdin: bool) -> LinkResult<PrivateKeyDer<'static>> {
+    let password = read_password(false, password_stdin)?;
+    let decoded = decrypt_pkcs8(path, password.as_bytes())?;
+    Ok(PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+        decoded.to_vec(),
+    )))
 }
 
 fn trust_roots(path: &Path) -> LinkResult<RootCertStore> {
@@ -264,14 +273,14 @@ async fn client(
     hostname: String,
     ca: &Path,
     cert: &Path,
-    key: &Path,
+    key: PrivateKeyDer<'static>,
 ) -> LinkResult<()> {
     if !bind.ip().is_loopback() {
         return Err("experimental client can only bind to loopback".into());
     }
     let config = ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
         .with_root_certificates(trust_roots(ca)?)
-        .with_client_auth_cert(certs(cert)?, private_key(key)?)?;
+        .with_client_auth_cert(certs(cert)?, key)?;
     let connector = TlsConnector::from(Arc::new(config));
     let listener = TcpListener::bind(bind).await?;
     let capacity = Arc::new(Semaphore::new(MAX_SESSIONS));
@@ -296,7 +305,8 @@ fn usage() {
     eprintln!(
         "EXPERIMENTAL TCP link, NOT a VPN:\n\
          fedup-link server <listen-ip:port> <loopback-target-ip:port> <ca.pem> <server.pem> <server.key> <allowlist.txt> [--allow-public-bind]\n\
-         fedup-link client <loopback-listen-ip:port> <server-ip:port> <server-dns-name> <ca.pem> <client.pem> <client.key>\n\
+         fedup-link client <loopback-listen-ip:port> <server-ip:port> <server-dns-name> <ca.pem> <client.pem> <encrypted-key.pem> --encrypted-key [--passphrase-stdin]\n\
+         fedup-link client <...> <plaintext-key.pem> --unsafe-lab-plaintext-key (temporary test compatibility)\n\
          fedup-link fingerprint <client.pem>\n\
          Both sides require operator-controlled certificates; the allowlist contains one SHA-256 certificate fingerprint per line."
     );
@@ -338,14 +348,33 @@ async fn main() {
                 )
                 .await
             }
-            [_, action, bind, server_addr, hostname, ca, cert, key] if action == "client" => {
+            [_, action, bind, server_addr, hostname, ca, cert, key, mode @ ..]
+                if action == "client" =>
+            {
+                let client_key = match mode {
+                    [encrypted] if encrypted == "--encrypted-key" => {
+                        encrypted_client_key(Path::new(key), false)?
+                    }
+                    [encrypted, stdin_flag]
+                        if encrypted == "--encrypted-key"
+                            && stdin_flag == "--passphrase-stdin" =>
+                    {
+                        encrypted_client_key(Path::new(key), true)?
+                    }
+                    [unsafe_flag] if unsafe_flag == "--unsafe-lab-plaintext-key" => {
+                        private_key(Path::new(key))?
+                    }
+                    _ => {
+                        return Err("specify --encrypted-key or explicit unsafe lab key mode".into());
+                    }
+                };
                 client(
                     bind.parse()?,
                     server_addr.parse()?,
                     hostname.to_string(),
                     Path::new(ca),
                     Path::new(cert),
-                    Path::new(key),
+                    client_key,
                 )
                 .await
             }
