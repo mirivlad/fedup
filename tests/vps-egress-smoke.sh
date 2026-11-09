@@ -193,7 +193,19 @@ if [[ "$(grep -c 'Service is online' "$TMP/http2-reuse.log" || :)" -ne 2 ]] ||
   echo "FAIL: expected two HTTPS/2 page responses over one TCP/TLS connection" >&2
   exit 1
 fi
-echo "Passive-compatible HTTP/2: 2 page requests over 1 TLS connection: PASS"
+# Browser HEAD probes should have correct status and NO response body.
+# `curl -I` requests remain entirely inside disposable namespaces.
+for proto in --http1.1 --http2; do
+  timeout 6 ip netns exec "$CN" curl -kfsSI --noproxy '*' "$proto" \
+    "https://172.31.44.1:7443/" >"$TMP/head-check.txt"
+  grep -q '^HTTP/.* 200' "$TMP/head-check.txt" || {
+    cat "$TMP/head-check.txt" >&2
+    echo "FAIL: anonymous HEAD has wrong HTTP status" >&2
+    exit 1
+  }
+done
+echo "Anonymous HEAD HTTP/1.1 and HTTP/2 status 200: PASS"
+echo "HTTP/2 reuse: 2 page requests over 1 TLS connection: PASS"
 echo "Anonymous HTTP/1.1 and HTTP/2 web fallback; protected URL denied: PASS"
 echo "Unauthenticated idle TLS socket deliberately held open"
 printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" \

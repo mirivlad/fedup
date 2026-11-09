@@ -508,7 +508,7 @@ const PUBLIC_MAX_H2_REQUESTS: usize = 16;
 const PUBLIC_H2_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn public_page(method: &str, path: &str) -> (StatusCode, &'static str, &'static [u8]) {
-    if method == "GET" && (path == "/" || path == "/index.html") {
+    if (method == "GET" || method == "HEAD") && (path == "/" || path == "/index.html") {
         (StatusCode::OK, "text/html; charset=utf-8", PUBLIC_PAGE)
     } else {
         (
@@ -548,7 +548,12 @@ async fn public_https_session(mut tls: tokio_rustls::server::TlsStream<TcpStream
                     .body(())?,
                 false,
             )?;
-            outgoing.send_data(Bytes::from_static(body), true)?;
+            if request.method() == http::Method::HEAD {
+                // HEAD has the same metadata as GET but MUST have no body.
+                outgoing.send_data(Bytes::new(), true)?;
+            } else {
+                outgoing.send_data(Bytes::from_static(body), true)?;
+            }
         }
         connection.graceful_shutdown();
         // Flush any pending HTTP/2 frames after GOAWAY.
@@ -594,7 +599,9 @@ async fn public_https_session(mut tls: tokio_rustls::server::TlsStream<TcpStream
         body.len(),
     );
     timeout(IO_TIMEOUT, tls.write_all(headers.as_bytes())).await??;
-    timeout(IO_TIMEOUT, tls.write_all(body)).await??;
+    if parts.first() != Some(&"HEAD") {
+        timeout(IO_TIMEOUT, tls.write_all(body)).await??;
+    }
     timeout(IO_TIMEOUT, tls.shutdown()).await??;
     Ok(())
 }
@@ -976,6 +983,9 @@ mod tests {
             assert_eq!(status, StatusCode::NOT_FOUND);
             assert_eq!(body, PUBLIC_NOT_FOUND);
         }
+        assert_eq!(public_page("HEAD", "/").0, StatusCode::OK);
+        assert_eq!(public_page("HEAD", "/index.html").0, StatusCode::OK);
+        assert_eq!(public_page("HEAD", "/fedup-lab/v1/ip-tunnel").0, StatusCode::NOT_FOUND);
         assert_eq!(public_page("POST", "/").0, StatusCode::NOT_FOUND);
         assert_eq!(public_page("CONNECT", "/").0, StatusCode::NOT_FOUND);
     }
