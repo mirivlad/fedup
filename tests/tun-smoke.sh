@@ -131,6 +131,10 @@ if [[ "$FAULT_MODE" == 1 ]]; then
 }
 JSON
   chmod 0600 "$TMP/netguard.json"
+  # Attempting to manage the original host namespace must fail before nft runs.
+  if "$NETGUARD" install "$TMP/netguard.json" >"$TMP/host-refusal.log" 2>&1; then
+    echo "FAIL: netguard accepted the initial host namespace" >&2; exit 1
+  fi
   ip netns exec "$CN" "$NETGUARD" install "$TMP/netguard.json"
   ip netns exec "$CN" "$NETGUARD" verify "$TMP/netguard.json"
   if ip netns exec "$CN" "$NETGUARD" install "$TMP/netguard.json" >"$TMP/reinstall.log" 2>&1; then
@@ -419,6 +423,23 @@ if [[ "$FAULT_MODE" == 1 ]]; then
   # Policy is independent of the now-dead VPN process. Removing it requires
   # an explicit operator-only action, and must never happen on process exit.
   ip netns exec "$CN" "$NETGUARD" verify "$TMP/netguard.json"
+  # An unexpected extra kernel rule must fail integrity verification and
+  # prevent accidental removal of a table someone else has modified.
+  ip netns exec "$CN" nft add rule inet fedup_lab_guard output ip daddr 198.51.100.252 counter drop
+  if ip netns exec "$CN" "$NETGUARD" verify "$TMP/netguard.json" >"$TMP/drift.log" 2>&1; then
+    echo "FAIL: netguard ignored unexpected extra firewall rule" >&2; exit 1
+  fi
+  if ip netns exec "$CN" "$NETGUARD" remove "$TMP/netguard.json" --confirm-lab-remove >"$TMP/drift-remove.log" 2>&1; then
+    echo "FAIL: netguard removed tampered firewall policy" >&2; exit 1
+  fi
+  handle="$(ip netns exec "$CN" nft -a list chain inet fedup_lab_guard output |
+    awk '/198[.]51[.]100[.]252/ {print $NF; exit}')"
+  if ! [[ "$handle" =~ ^[0-9]+$ ]]; then
+    echo "FAIL: cannot safely identify synthetic drift rule handle" >&2; exit 1
+  fi
+  ip netns exec "$CN" nft delete rule inet fedup_lab_guard output handle "$handle"
+  ip netns exec "$CN" "$NETGUARD" verify "$TMP/netguard.json"
+  echo "Kernel-policy drift and unsafe deletion both detected: PASS"
   ip netns exec "$CN" "$NETGUARD" remove "$TMP/netguard.json" --confirm-lab-remove
   if ip netns exec "$CN" "$NETGUARD" verify "$TMP/netguard.json" >/dev/null 2>&1; then
     echo "FAIL: netguard policy survived its explicit removal" >&2; exit 1
