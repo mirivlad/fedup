@@ -20,7 +20,7 @@ The kernel policy remains in effect after the command exits and after a VPN clie
 
 Only exact IPv4/IPv6 hosts are supported, with limited sizes, duplicate checks, strict unknown-field rejection and an ASCII-only interface name. Arbitrary CIDR routing or user-defined nftables expressions are deliberately unsupported. Values never enter a shell.
 
-Operations are plan (read-only), install (create-only), verify (full expected-rule comparison, ignoring dynamic packet counters), and remove (requires explicit --confirm-lab-remove and a successful integrity check). An existing table is **not** overwritten, and rule installation failures do not trigger an automatic unsafe remove. This helper invokes nft from a fixed trusted system path.
+Operations are plan (read-only), install (create-only), ensure (safe idempotent restart: verifies existing rules without replacing them), verify (full expected-rule comparison, ignoring dynamic packet counters), and remove (requires explicit --confirm-lab-remove and a successful integrity check). An existing table is **not** overwritten; ensure refuses modified rules, and rule installation failures do not trigger an automatic unsafe remove. This helper invokes nft from a fixed trusted system path.
 
 ## Run the isolated integration tests
 

@@ -9,7 +9,7 @@ A TUN client can die and leave an ordinary network route usable. A kill switch c
 
 ## Decision
 
-Implement fedup-netguard as an isolated privileged Rust helper with a strict versioned JSON manifest and no arbitrary nft expressions. It runs only inside non-initial Linux network namespaces, validates exact destination hosts, TUN interface name and mandatory direct-DNS block, and creates a dedicated output hook table in one atomic nft transaction. It refuses to replace existing tables, verifies the expected rules independently of runtime counters and allows explicit, verified operator removal only.
+Implement fedup-netguard as an isolated privileged Rust helper with a strict versioned JSON manifest and no arbitrary nft expressions. It runs only inside non-initial Linux network namespaces, validates exact destination hosts, TUN interface name and mandatory direct-DNS block, and creates a dedicated output hook table in one atomic nft transaction. It refuses to replace existing tables, provides an idempotent ensure entry point that verifies rules on service restart without modifying existing policy, verifies independently of runtime counters and allows explicit, verified operator removal only.
 
 The VPN process does not need to hold netguard permissions. Kernel rules outlive the VPN and netguard processes. No host firewall, default routes or DNS are modified in this stage.
 
