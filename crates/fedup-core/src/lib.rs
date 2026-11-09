@@ -251,7 +251,10 @@ mod tests {
         for (byte, value) in [(0, 0x46), (2, 1), (3, 27), (6, 0x20), (6, 0x80), (7, 1)] {
             let mut packet = base.clone();
             packet[byte] = value;
-            assert!(!policy.admits(&packet, Direction::ClientToServer), "{byte} {value}");
+            assert!(
+                !policy.admits(&packet, Direction::ClientToServer),
+                "{byte} {value}"
+            );
         }
         let mut with_df = base;
         with_df[6] = 0x40;
