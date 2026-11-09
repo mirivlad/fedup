@@ -148,10 +148,14 @@ async fn enroll_device(
     let Some(issuer) = state.issuer.clone() else {
         return reply(StatusCode::SERVICE_UNAVAILABLE).into_response();
     };
-    if input.username.len() > 48 || input.username.is_empty()
-        || input.password.len() > 128 || input.password.is_empty()
-        || input.device.is_empty() || input.device.len() > 48
-        || input.csr_pem.len() > 8192 || input.csr_pem.is_empty()
+    if input.username.len() > 48
+        || input.username.is_empty()
+        || input.password.len() > 128
+        || input.password.is_empty()
+        || input.device.is_empty()
+        || input.device.len() > 48
+        || input.csr_pem.len() > 8192
+        || input.csr_pem.is_empty()
     {
         return reply(StatusCode::UNAUTHORIZED).into_response();
     }
@@ -173,20 +177,28 @@ async fn enroll_device(
             .ok_or(StatusCode::UNAUTHORIZED)?;
         // The signature on the CSR proves the client holds the corresponding
         // private key. We never receive or store its private key.
-        let issued = issuer.issue(&csr_pem, &device)
+        let issued = issuer
+            .issue(&csr_pem, &device)
             .map_err(|_| StatusCode::BAD_REQUEST)?;
         fedup_users::register_device(
-            &users, &username, revision, &device,
-            &issued.fingerprint_sha256, issued.expires_at,
-        ).map_err(|_| StatusCode::CONFLICT)?;
+            &users,
+            &username,
+            revision,
+            &device,
+            &issued.fingerprint_sha256,
+            issued.expires_at,
+        )
+        .map_err(|_| StatusCode::CONFLICT)?;
         Ok::<_, StatusCode>(issued)
-    }).await;
+    })
+    .await;
 
     match task {
         Ok(Ok(issued)) => {
             let mut response = (StatusCode::CREATED, JsonResponse(issued)).into_response();
             response.headers_mut().insert(
-                header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-store")
+                header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("no-store"),
             );
             response
         }
