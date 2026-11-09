@@ -287,7 +287,9 @@ pub fn read_password(confirm: bool, password_stdin: bool) -> IdentityResult<Zero
         std::io::stdin().read_line(&mut input)?;
         Zeroizing::new(input.trim_end_matches(['\n', '\r']).to_owned())
     } else {
-        Zeroizing::new(rpassword::prompt_password("Device private-key passphrase: ")?)
+        Zeroizing::new(rpassword::prompt_password(
+            "Device private-key passphrase: ",
+        )?)
     };
     if first.len() < 16 || first.len() > 1024 {
         return Err("passphrase must contain 16-1024 UTF-8 bytes".into());
