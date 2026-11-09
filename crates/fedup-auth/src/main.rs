@@ -8,10 +8,11 @@
 use axum::extract::{DefaultBodyLimit, Json, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::Json as JsonResponse;
 use axum::Router;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 mod issuer;
 use issuer::LabIssuer;
 use std::collections::HashMap;
@@ -129,6 +130,18 @@ async fn login(State(state): State<Arc<App>>, Json(input): Json<Login>) -> impl 
     }
 }
 
+async fn enrollment_config(State(state): State<Arc<App>>) -> Response {
+    let Some(issuer) = &state.issuer else {
+        return reply(StatusCode::SERVICE_UNAVAILABLE).into_response();
+    };
+    let mut response = JsonResponse(issuer.public_config()).into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    response
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DeviceRequest {
@@ -177,18 +190,25 @@ async fn enroll_device(
             .ok_or(StatusCode::UNAUTHORIZED)?;
         // The signature on the CSR proves the client holds the corresponding
         // private key. We never receive or store its private key.
-        let issued = issuer
+        let mut issued = issuer
             .issue(&csr_pem, &device)
             .map_err(|_| StatusCode::BAD_REQUEST)?;
-        fedup_users::register_device(
+        let csr_sha256 = hex::encode(Sha256::digest(csr_pem.as_bytes()));
+        let (saved_cert, saved_fp) = fedup_users::register_signed_device(
             &users,
             &username,
             revision,
             &device,
+            &csr_sha256,
             &issued.fingerprint_sha256,
             issued.expires_at,
+            &issued.certificate_pem,
         )
         .map_err(|_| StatusCode::CONFLICT)?;
+        // Duplicate, authenticated retries receive the same originally
+        // issued cert. Never create multiple active certs after a lost reply.
+        issued.certificate_pem = saved_cert;
+        issued.fingerprint_sha256 = saved_fp;
         Ok::<_, StatusCode>(issued)
     })
     .await;
@@ -217,6 +237,7 @@ fn app(users: PathBuf, issuer: Option<LabIssuer>) -> Router {
             "/api/fedup/v1/devices",
             post(enroll_device).layer(DefaultBodyLimit::max(16 * 1024)),
         )
+        .route("/api/fedup/v1/config", get(enrollment_config))
         .with_state(Arc::new(App::new(users, issuer)))
 }
 
