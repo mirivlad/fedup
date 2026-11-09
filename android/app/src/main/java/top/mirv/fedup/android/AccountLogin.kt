@@ -46,6 +46,8 @@ internal object AccountLogin {
         val serverName: String,
         val caPem: String,
         val caSha256: String,
+        val transport: String,
+        val tunnelPort: Int,
     )
 
     data class Certificate(
@@ -67,20 +69,36 @@ internal object AccountLogin {
         return buffer.toString("UTF-8")
     }
 
-    fun config(server: String): Config {
+    fun config(server: String, username: String, password: String): Config {
+        require(username.matches(Regex("[a-z0-9._-]{1,48}")))
+        require(password.toByteArray(Charsets.UTF_8).size in 1..128)
+        val payload = JSONObject()
+            .put("username", username)
+            .put("password", password)
+            .toString().toRequestBody(jsonType)
         val request = Request.Builder()
             .url(endpoint(server).newBuilder().encodedPath("/api/fedup/v1/config").build())
             .header("Cache-Control", "no-store")
-            .get().build()
+            .post(payload).build()
         client.newCall(request).execute().use { response ->
+            if (response.code == 404) error("Конфигурация устройства недоступна для этого входа")
+            if (response.code == 429) error("Слишком много попыток")
             require(response.code == 200) {
-                "Server does not provide automatic enrollment (HTTP " + response.code + ")"
+                "Server does not provide account-authorized enrollment (HTTP " + response.code + ")"
             }
             val json = JSONObject(limitedBody(response))
+            val transport = json.optString("transport", "mtls")
+            require(transport == "mtls" || transport == "app-proof") {
+                "Unsupported VPN authentication transport"
+            }
+            val port = json.optInt("tunnel_port", if (transport == "app-proof") 443 else 7443)
+            require(port in 1..65535) { "Invalid VPN port in authenticated config" }
             return Config(
                 json.getString("server_name"),
                 json.getString("ca_pem"),
                 json.getString("ca_sha256"),
+                transport,
+                port,
             )
         }
     }
