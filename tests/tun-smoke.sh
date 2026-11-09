@@ -137,6 +137,9 @@ JSON
   fi
   ip netns exec "$CN" "$NETGUARD" install "$TMP/netguard.json"
   ip netns exec "$CN" "$NETGUARD" verify "$TMP/netguard.json"
+  # A trusted service may restart without replacing or briefly dropping rules.
+  ip netns exec "$CN" "$NETGUARD" ensure "$TMP/netguard.json"
+  ip netns exec "$CN" "$NETGUARD" ensure "$TMP/netguard.json"
   if ip netns exec "$CN" "$NETGUARD" install "$TMP/netguard.json" >"$TMP/reinstall.log" 2>&1; then
     echo "FAIL: netguard unexpectedly overwrote an existing table" >&2; exit 1
   fi
@@ -428,6 +431,9 @@ if [[ "$FAULT_MODE" == 1 ]]; then
   ip netns exec "$CN" nft add rule inet fedup_lab_guard output ip daddr 198.51.100.252 counter drop
   if ip netns exec "$CN" "$NETGUARD" verify "$TMP/netguard.json" >"$TMP/drift.log" 2>&1; then
     echo "FAIL: netguard ignored unexpected extra firewall rule" >&2; exit 1
+  fi
+  if ip netns exec "$CN" "$NETGUARD" ensure "$TMP/netguard.json" >"$TMP/drift-ensure.log" 2>&1; then
+    echo "FAIL: netguard restarted over a tampered policy" >&2; exit 1
   fi
   if ip netns exec "$CN" "$NETGUARD" remove "$TMP/netguard.json" --confirm-lab-remove >"$TMP/drift-remove.log" 2>&1; then
     echo "FAIL: netguard removed tampered firewall policy" >&2; exit 1
