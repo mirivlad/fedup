@@ -116,14 +116,14 @@ internal class LabTunnelSession(
                     }
                 }
             }
-            val builder = if (appProof) {
+            val requestBuilder = if (appProof) {
                 ApplicationProof.signedRequest(
                     identity, client, baseUrl, "POST", "/fedup-lab/v1/ip-tunnel"
                 )
             } else {
                 Request.Builder().url(baseUrl + "/fedup-lab/v1/ip-tunnel")
             }
-            val request = builder.post(requestBody).build()
+            val request = requestBuilder.post(requestBody).build()
             val runningCall = client.newCall(request)
             call = runningCall
             runningCall.execute().use { response ->

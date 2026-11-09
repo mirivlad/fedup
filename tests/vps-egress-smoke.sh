@@ -153,7 +153,7 @@ if [[ "$AUTH_MODE" == edge ]]; then
     # the HTTPS domain. Use a trusted test-name fallback only in this lab.
     default_sni localhost
 }
-https://localhost:7443 {
+https://:7443 {
     bind 172.31.44.1
     tls $TMP/server.pem $TMP/server.key
     reverse_proxy h2c://127.0.0.1:47678 {
@@ -206,7 +206,13 @@ done
 # independent and is tested below. Everything stays inside Linux namespaces.
 if ! timeout 7 ip netns exec "$CN" curl -kfsS --noproxy '*' --http1.1 \
     --connect-timeout 2 "https://172.31.44.1:7443/" | grep -q "Service is online"; then
-  echo "FAIL: anonymous HTTP/1.1 fallback unavailable" >&2; exit 1
+  echo "FAIL: anonymous HTTP/1.1 fallback unavailable" >&2
+  if [[ "$AUTH_MODE" == edge ]]; then
+    cat "$TMP/caddy.log" "$TMP/server.log" >&2
+    timeout 4 ip netns exec "$CN" curl -vk --noproxy '*' \
+      "https://172.31.44.1:7443/" >/dev/null 2>&1 || :
+  fi
+  exit 1
 fi
 if ! timeout 7 ip netns exec "$CN" nghttp --no-verify-peer \
     "https://172.31.44.1:7443/" | grep -q "Service is online"; then

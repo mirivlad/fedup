@@ -144,10 +144,7 @@ struct AuthenticatedConfig {
     tunnel_port: u16,
 }
 
-async fn enrollment_config(
-    State(state): State<Arc<App>>,
-    Json(input): Json<Login>,
-) -> Response {
+async fn enrollment_config(State(state): State<Arc<App>>, Json(input): Json<Login>) -> Response {
     let Some(issuer) = &state.issuer else {
         return reply(StatusCode::SERVICE_UNAVAILABLE).into_response();
     };
@@ -165,7 +162,8 @@ async fn enrollment_config(
         device_ca: issuer.public_config(),
         transport: if stealth { "app-proof" } else { "mtls" },
         tunnel_port: if stealth { 443 } else { 7443 },
-    }).into_response();
+    })
+    .into_response();
     response.headers_mut().insert(
         header::CACHE_CONTROL,
         axum::http::HeaderValue::from_static("no-store"),
@@ -270,10 +268,12 @@ fn app(users: PathBuf, issuer: Option<LabIssuer>) -> Router {
             "/api/fedup/v1/devices",
             post(enroll_device).layer(DefaultBodyLimit::max(16 * 1024)),
         )
-        .route("/api/fedup/v1/config",
+        .route(
+            "/api/fedup/v1/config",
             post(enrollment_config)
                 .get(|| async { StatusCode::NOT_FOUND })
-                .layer(DefaultBodyLimit::max(2048)))
+                .layer(DefaultBodyLimit::max(2048)),
+        )
         .with_state(Arc::new(App::new(users, issuer)))
 }
 
