@@ -1,0 +1,13 @@
+[package]
+name = "fedup-admin"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Experimental Linux CLI for administering FedUp client certificate fingerprints"
+
+[dependencies]
+fs2 = "0.4"
+rustls-pemfile = "2.2"
+sha2 = "0.10"
+tempfile = "3"
