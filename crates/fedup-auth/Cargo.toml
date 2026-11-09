@@ -1,0 +1,18 @@
+[package]
+name = "fedup-auth"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Loopback-only FedUp password authentication API, intended for a correctly configured HTTPS reverse proxy"
+
+[dependencies]
+axum = { version = "0.8", features = ["json"] }
+fedup-users = { path = "../fedup-users" }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1.48", features = ["full"] }
+zeroize = { version = "1.8", features = ["derive"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tempfile = "3"
