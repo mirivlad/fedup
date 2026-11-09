@@ -394,6 +394,32 @@ async fn h2_client_session(
     result
 }
 
+/// Authorization-only HTTP/2 request: no TUN is created, and only a
+/// fingerprint-authorized device receives 204 from the server.
+async fn h2_auth_probe(
+    tls: tokio_rustls::client::TlsStream<TcpStream>,
+    hostname: &str,
+) -> Result<()> {
+    if tls.get_ref().1.alpn_protocol() != Some(b"h2".as_slice()) {
+        return Err("authorization probe requires ALPN h2".into());
+    }
+    let (mut sender, connection) = timeout(IO_TIMEOUT, h2_client::handshake(tls)).await??;
+    let driver = tokio::spawn(connection);
+    sender = timeout(IO_TIMEOUT, sender.ready()).await??;
+    let request = Request::builder()
+        .method(http::Method::GET)
+        .uri(format!("https://{hostname}/fedup-lab/v1/auth-check"))
+        .body(())?;
+    let (response, _) = sender.send_request(request, true)?;
+    let reply = timeout(IO_TIMEOUT, response).await??;
+    driver.abort();
+    if reply.status() != StatusCode::NO_CONTENT {
+        return Err(format!("device not authorized by server: {}", reply.status()).into());
+    }
+    println!("FedUp mTLS and real HTTP/2 authorization probe: PASS (no TUN created)");
+    Ok(())
+}
+
 async fn server_session(
     socket: TcpStream,
     acceptor: TlsAcceptor,
@@ -466,6 +492,7 @@ async fn client(
     directory: &Path,
     password_stdin: bool,
     http2: bool,
+    auth_only: bool,
 ) -> Result<()> {
     require_isolated_network_namespace()?;
     if !private_lab_ip(server) {
@@ -486,6 +513,12 @@ async fn client(
     let hostname = device.server_name;
     let server_name: ServerName<'static> = ServerName::try_from(hostname.clone())?;
     let mut tls = timeout(IO_TIMEOUT, connector.connect(server_name, socket)).await??;
+    if auth_only {
+        if !http2 {
+            return Err("authorization probe needs real HTTP/2".into());
+        }
+        return h2_auth_probe(tls, &hostname).await;
+    }
     if http2 {
         return h2_client_session(tls, &hostname, name).await;
     }
@@ -505,6 +538,7 @@ fedup-tun server <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <serv
 fedup-tun client <private-server-ip:port> <tun-name> <enrolled-device-dir> [--passphrase-stdin]
 fedup-tun server-h2 <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <allowlist.txt>
 fedup-tun client-h2 <private-server-ip:port> <tun-name> <enrolled-device-dir> [--passphrase-stdin]
+fedup-tun probe-h2 <private-server-ip:port> <enrolled-device-dir> [--passphrase-stdin]
 
 Fixed peers: 10.77.0.2 <-> 10.77.0.1 or 10.88.0.10, and
 fd42:fed0::2 <-> fd42:fed0::1 or fd42:fed1::10.
@@ -538,6 +572,7 @@ async fn main() {
                     Path::new(device),
                     false,
                     cmd == "client-h2",
+                    false,
                 )
                 .await
             }
@@ -550,8 +585,17 @@ async fn main() {
                     Path::new(device),
                     true,
                     cmd == "client-h2",
+                    false,
                 )
                 .await
+            }
+            [_, cmd, addr, device] if cmd == "probe-h2" => {
+                client(addr.parse()?, "", Path::new(device), false, true, true).await
+            }
+            [_, cmd, addr, device, flag]
+                if cmd == "probe-h2" && flag == "--passphrase-stdin" =>
+            {
+                client(addr.parse()?, "", Path::new(device), true, true, true).await
             }
             _ => {
                 usage();
