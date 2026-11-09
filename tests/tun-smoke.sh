@@ -56,6 +56,31 @@ ip -n "$CN" addr add 172.31.44.2/30 dev "$CV"
 ip -n "$SN" addr add 172.31.44.1/30 dev "$SV"
 ip -n "$CN" link set "$CV" up; ip -n "$SN" link set "$SV" up
 ip -n "$CN" link set lo up; ip -n "$SN" link set lo up
+
+# Optional passive TLS capture: only artificial addresses inside this namespace.
+# Set FEDUP_CAPTURE_PCAP to an output path (never capture personal browsing).
+CAPTURE="$(printenv FEDUP_CAPTURE_PCAP 2>/dev/null || true)"
+if [[ -n "$CAPTURE" ]]; then
+  command -v tcpdump >/dev/null || { echo "tcpdump required for capture" >&2; exit 2; }
+  ip netns exec "$SN" tcpdump -i "$SV" -n -s 0 -U -w "$CAPTURE" \
+    '(tcp port 7443 or tcp port 9443)' >"$TMP/tcpdump.log" 2>&1 &
+  PIDS="$PIDS $!"
+  sleep 0.5
+  # Control sample: genuine TLS 1.3 with an HTTP/1.1 application, not a
+  # browser fingerprint or HTTP/2 baseline.
+  ip netns exec "$SN" openssl s_server -accept 172.31.44.1:9443 \
+    -cert "$TMP/server.pem" -key "$TMP/server.key" -tls1_3 -www \
+    >"$TMP/https.log" 2>&1 &
+  PIDS="$PIDS $!"
+  for i in $(seq 1 30); do
+    if ip netns exec "$CN" curl -k -fsS --noproxy '*' --http1.1 \
+      --connect-timeout 1 -m 3 --resolve localhost:9443:172.31.44.1 \
+      https://localhost:9443/ >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.2
+  done
+fi
 if ip -n "$CN" route get 1.1.1.1 >/dev/null 2>&1; then
   echo "FAIL: test namespace has external route" >&2; exit 1
 fi
