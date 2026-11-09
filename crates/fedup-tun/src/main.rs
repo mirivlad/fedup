@@ -985,7 +985,10 @@ mod tests {
         }
         assert_eq!(public_page("HEAD", "/").0, StatusCode::OK);
         assert_eq!(public_page("HEAD", "/index.html").0, StatusCode::OK);
-        assert_eq!(public_page("HEAD", "/fedup-lab/v1/ip-tunnel").0, StatusCode::NOT_FOUND);
+        assert_eq!(
+            public_page("HEAD", "/fedup-lab/v1/ip-tunnel").0,
+            StatusCode::NOT_FOUND
+        );
         assert_eq!(public_page("POST", "/").0, StatusCode::NOT_FOUND);
         assert_eq!(public_page("CONNECT", "/").0, StatusCode::NOT_FOUND);
     }
