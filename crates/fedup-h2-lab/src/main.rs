@@ -124,7 +124,10 @@ async fn echo_stream(mut incoming: RecvStream, mut send: SendStream<Bytes>) -> R
 fn request_valid(req: &Request<RecvStream>) -> bool {
     req.method() == http::Method::POST
         && req.uri().path() == URI
-        && req.headers().get(http::header::CONTENT_TYPE).is_some_and(|h| h == TYPE)
+        && req
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .is_some_and(|h| h == TYPE)
 }
 
 /// An authenticated loopback HTTPS/2 application, not a generic CONNECT proxy.
@@ -149,7 +152,10 @@ async fn handle(socket: TcpStream, acceptor: TlsAcceptor, allowlist: &Path) -> R
     while let Some(next) = timeout(TRANSFER_TIMEOUT, connection.accept()).await? {
         let (req, mut respond) = next?;
         if active || !request_valid(&req) {
-            respond.send_response(Response::builder().status(StatusCode::NOT_FOUND).body(())?, true)?;
+            respond.send_response(
+                Response::builder().status(StatusCode::NOT_FOUND).body(())?,
+                true,
+            )?;
             continue;
         }
         active = true;
@@ -203,7 +209,12 @@ fn synthetic_payload(size: usize) -> Vec<u8> {
     (0..size).map(|i| (i % 251) as u8).collect()
 }
 
-async fn run_client(server: SocketAddr, device_dir: &Path, amount: usize, stdin: bool) -> Result<()> {
+async fn run_client(
+    server: SocketAddr,
+    device_dir: &Path,
+    amount: usize,
+    stdin: bool,
+) -> Result<()> {
     if !server.ip().is_loopback() {
         return Err("HTTP/2 test client accepts loopback destination only".into());
     }
@@ -231,7 +242,11 @@ async fn run_client(server: SocketAddr, device_dir: &Path, amount: usize, stdin:
     sender = timeout(CONNECT_TIMEOUT, sender.ready()).await??;
     let request = Request::builder()
         .method(http::Method::POST)
-        .uri(format!("https://{}/{}", device.server_name, URI.trim_start_matches('/')))
+        .uri(format!(
+            "https://{}/{}",
+            device.server_name,
+            URI.trim_start_matches('/')
+        ))
         .header(http::header::CONTENT_TYPE, TYPE)
         .body(())?;
     let (response, mut outbound) = sender.send_request(request, false)?;
@@ -249,7 +264,11 @@ async fn run_client(server: SocketAddr, device_dir: &Path, amount: usize, stdin:
     if response.status() != StatusCode::OK {
         return Err(format!("HTTP/2 status {}", response.status()).into());
     }
-    if response.headers().get(http::header::CONTENT_TYPE).is_none_or(|v| v != TYPE) {
+    if response
+        .headers()
+        .get(http::header::CONTENT_TYPE)
+        .is_none_or(|v| v != TYPE)
+    {
         return Err("unexpected response content type".into());
     }
     let mut incoming = response.into_body();
@@ -264,11 +283,18 @@ async fn run_client(server: SocketAddr, device_dir: &Path, amount: usize, stdin:
     }
     outgoing.await??;
     if actual != expected {
-        return Err(format!("HTTP/2 echo mismatch: {}/{} bytes", actual.len(), expected.len()).into());
+        return Err(format!(
+            "HTTP/2 echo mismatch: {}/{} bytes",
+            actual.len(),
+            expected.len()
+        )
+        .into());
     }
     drop(sender);
     driver.abort();
-    println!("FedUp genuine HTTPS/2 POST streaming roundtrip: {amount} binary bytes, ALPN h2 verified");
+    println!(
+        "FedUp genuine HTTPS/2 POST streaming roundtrip: {amount} binary bytes, ALPN h2 verified"
+    );
     Ok(())
 }
 
