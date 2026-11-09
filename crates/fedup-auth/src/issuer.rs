@@ -113,6 +113,7 @@ impl LabIssuer {
         OsRng.fill_bytes(&mut serial);
         serial[0] = (serial[0] & 0x7f) | 1;
         params.serial_number = Some(SerialNumber::from_slice(&serial));
+        let expires_at = params.not_after.unix_timestamp();
         let signed = params.signed_by(&csr.public_key, &issuer)?;
         let certificate_pem = signed.pem();
         let fingerprint_sha256 = hex::encode(Sha256::digest(one_certificate(&certificate_pem)?));
@@ -122,7 +123,7 @@ impl LabIssuer {
             server_name: self.server_name.clone(),
             ca_sha256: self.ca_sha256.clone(),
             fingerprint_sha256,
-            expires_at: params.not_after.unix_timestamp(),
+            expires_at,
         })
     }
 }
