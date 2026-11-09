@@ -111,10 +111,9 @@ PIDS="$PIDS $!"
   "$TEMP/ca.pem" "$TEMP/server.pem" "$TEMP/server.key" "$TEMP/allowed.txt" \
   >"$TEMP/server.log" 2>&1 &
 PIDS="$PIDS $!"
-printf '%s\n' "$PASSWORD" | "$LINK" client \
-  "127.0.0.1:$LOCAL_PORT" "127.0.0.1:$SERVER_PORT" localhost \
-  "$TEMP/ca.pem" "$TEMP/device/client.pem" "$TEMP/device/client-key.enc.pem" \
-  --encrypted-key --passphrase-stdin >"$TEMP/client.log" 2>&1 &
+printf '%s\n' "$PASSWORD" | "$LINK" client-device \
+  "127.0.0.1:$LOCAL_PORT" "127.0.0.1:$SERVER_PORT" "$TEMP/device" \
+  --passphrase-stdin >"$TEMP/client.log" 2>&1 &
 PIDS="$PIDS $!"
 
 python3 - "$LOCAL_PORT" <<'PY'
