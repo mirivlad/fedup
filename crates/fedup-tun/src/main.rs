@@ -99,9 +99,7 @@ enum DeviceAuthorization {
 fn authorized(policy: &DeviceAuthorization, fp: &str) -> Result<bool> {
     match policy {
         DeviceAuthorization::Allowlist(path) => authorized_allowlist(path, fp),
-        DeviceAuthorization::AccountDatabase(dir) => {
-            Ok(fedup_users::authorized_device(dir, fp)?)
-        }
+        DeviceAuthorization::AccountDatabase(dir) => Ok(fedup_users::authorized_device(dir, fp)?),
     }
 }
 
