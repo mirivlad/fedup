@@ -43,7 +43,7 @@ Offline issuer:
 ~~~sh
 target/debug/fedup-enroll approve /secure/offline/fedup-issuer \
     /secure/offline/ca.pem /secure/offline/ca.key \
-    phone-request.json phone-cert.pem
+    phone-request.json phone-cert.pem --unsafe-lab-plaintext-ca
 ~~~
 
 The issuer exports only the public certificate for the device to import. To enable it on the server:
@@ -58,7 +58,7 @@ If the issuer committed a certificate but the export failed:
 fedup-enroll recover /secure/offline/fedup-issuer INVITATION_ID recovered-cert.pem
 ~~~
 
-This is a **manual approval** flow. No automatic transport of the invitation, CSR or certificate is implemented. The CA key loader currently supports **unencrypted PKCS#8 PEM** and is **not appropriate for a real production issuer without a stronger storage/unlock design**.
+This is a **manual approval** flow. No automatic transport of the invitation, CSR or certificate is implemented. The CA key loader currently supports **unencrypted PKCS#8 PEM** and explicitly requires **--unsafe-lab-plaintext-ca**. This is strictly a disposable-lab facility, not a production issuer. A protected CA-key unlock mechanism is required before real device enrollment.
 
 ## Important limitations
 

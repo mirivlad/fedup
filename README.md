@@ -2,7 +2,7 @@
 
 **FedUp** is an early-stage, open-source project for a self-hosted, cross-platform private network tunnel for personal and family use.
 
-> Status: **early research with laboratory transport and administration tools**. The Rust framing codec, one-shot mTLS lab, fixed-destination TCP forwarder and SSH-first device admin are NOT a VPN or production-ready network service. Do not rely on this project for anonymity or security-critical connectivity.
+> Status: **early research with laboratory transport, administration and offline enrollment tools**. The Rust framing codec, one-shot mTLS lab, fixed-destination TCP forwarder, SSH-first device admin and offline invitation issuer are NOT a VPN or production-ready network service. Do not rely on this project for anonymity or security-critical connectivity.
 
 ## Goals
 
@@ -41,12 +41,13 @@ On Linux with the Rust toolchain, OpenSSL and Python 3:
 
 ```sh
 cargo test --workspace --all-targets
-cargo build -p fedup-lab -p fedup-link -p fedup-admin
+cargo build -p fedup-lab -p fedup-link -p fedup-admin -p fedup-enroll
 bash tests/lab-smoke.sh
 bash tests/link-smoke.sh
+bash tests/enroll-smoke.sh
 ```
 
-For parser fuzzing, install cargo-fuzz and run `cargo fuzz run frame_parser` from the `fuzz/` directory. See [SSH device administration (Russian)](docs/ru/admin.md), [admin reference](docs/admin.md), [lab instructions (Russian)](docs/ru/lab.md), [TCP link instructions (Russian)](docs/ru/tcp-link.md), [link design & limitations](docs/tcp-link.md) and [experimental wire framing](docs/protocol-v1.md).
+For parser fuzzing, install cargo-fuzz and run `cargo fuzz run frame_parser` from the `fuzz/` directory. See [offline enrollment (Russian)](docs/ru/enrollment.md), [offline enrollment reference](docs/enrollment.md), [SSH device administration (Russian)](docs/ru/admin.md), [admin reference](docs/admin.md), [lab instructions (Russian)](docs/ru/lab.md), [TCP link instructions (Russian)](docs/ru/tcp-link.md), [link design & limitations](docs/tcp-link.md) and [experimental wire framing](docs/protocol-v1.md).
 
 ## Read the design
 

@@ -29,19 +29,19 @@ req['token'] = "0"*64
 with open(sys.argv[2], 'w') as out: json.dump(req,out)
 PY
 if "$ENROLL" approve "$TEMP/issuer-state" "$TEMP/ca.pem" "$TEMP/ca.key" \
- "$TEMP/tampered.json" "$TEMP/wrong.pem" >/dev/null 2>&1; then
+ "$TEMP/tampered.json" "$TEMP/wrong.pem" --unsafe-lab-plaintext-ca >/dev/null 2>&1; then
   echo "SECURITY FAILURE: modified token was accepted" >&2
   exit 1
 fi
 
 "$ENROLL" approve "$TEMP/issuer-state" "$TEMP/ca.pem" "$TEMP/ca.key" \
- "$TEMP/request.json" "$TEMP/issued.pem"
+ "$TEMP/request.json" "$TEMP/issued.pem" --unsafe-lab-plaintext-ca
 openssl verify -CAfile "$TEMP/ca.pem" -purpose sslclient "$TEMP/issued.pem" | grep -q OK
 openssl x509 -in "$TEMP/issued.pem" -noout -text | grep -q "TLS Web Client Authentication"
 openssl x509 -in "$TEMP/issued.pem" -noout -text | grep -q "CA:FALSE"
 
 if "$ENROLL" approve "$TEMP/issuer-state" "$TEMP/ca.pem" "$TEMP/ca.key" \
- "$TEMP/request.json" "$TEMP/replayed.pem" >/dev/null 2>&1; then
+ "$TEMP/request.json" "$TEMP/replayed.pem" --unsafe-lab-plaintext-ca >/dev/null 2>&1; then
   echo "SECURITY FAILURE: invitation replay signed another certificate" >&2
   exit 1
 fi
