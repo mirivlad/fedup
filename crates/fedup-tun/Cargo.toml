@@ -7,6 +7,7 @@ repository.workspace = true
 description = "Single-client Linux IP TUN lab over mTLS; restricted lab subnet only"
 
 [dependencies]
+fedup-core = { path = "../fedup-core" }
 bytes = "1"
 h2 = "0.4"
 http = "1"

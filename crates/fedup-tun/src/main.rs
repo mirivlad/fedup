@@ -4,6 +4,7 @@
 //! or a single synthetic egress host, inside operator-controlled network namespaces.
 
 use bytes::Bytes;
+use fedup_core::{Direction, IpPolicy, LAB_MTU};
 use fedup_identity::{decrypt_pkcs8, device_connection, read_password};
 use fedup_protocol::{encode_header, parse_header, Frame, FrameKind, HEADER_LEN};
 use h2::{client as h2_client, server as h2_server, RecvStream, SendStream};
@@ -16,7 +17,7 @@ use std::error::Error;
 use std::fs::{self, File};
 use std::future::poll_fn;
 use std::io::BufReader;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,7 +31,7 @@ type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 const FRAME_TIMEOUT: Duration = Duration::from_secs(45);
 const RECHECK: Duration = Duration::from_secs(5);
-const MAX_PACKET: usize = 1280;
+const MAX_PACKET: usize = LAB_MTU;
 const TUN_BUFFER: usize = 65536;
 const MAX_ALLOWLIST_BYTES: u64 = 65536;
 const STREAM: u32 = 1;
@@ -89,12 +90,6 @@ fn authorized(path: &Path, fp: &str) -> Result<bool> {
     Ok(found)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Direction {
-    ClientToServer,
-    ServerToClient,
-}
-
 /// Extra laboratory safeguard: refuse to start in the initial network
 /// namespace of the current Linux instance. This does not replace a
 /// sandbox or a privilege separation policy.
@@ -113,106 +108,6 @@ fn private_lab_ip(addr: SocketAddr) -> bool {
     match addr.ip() {
         IpAddr::V4(ip) => ip.is_private() || ip.is_loopback(),
         IpAddr::V6(_) => false,
-    }
-}
-
-fn addresses(dir: Direction) -> (IpAddr, IpAddr) {
-    match dir {
-        Direction::ClientToServer => (
-            IpAddr::V4(Ipv4Addr::new(10, 77, 0, 2)),
-            IpAddr::V4(Ipv4Addr::new(10, 77, 0, 1)),
-        ),
-        Direction::ServerToClient => (
-            IpAddr::V4(Ipv4Addr::new(10, 77, 0, 1)),
-            IpAddr::V4(Ipv4Addr::new(10, 77, 0, 2)),
-        ),
-    }
-}
-
-fn addresses_v6(dir: Direction) -> (Ipv6Addr, Ipv6Addr) {
-    let server: Ipv6Addr = "fd42:fed0::1".parse().expect("static IPv6");
-    let client: Ipv6Addr = "fd42:fed0::2".parse().expect("static IPv6");
-    match dir {
-        Direction::ClientToServer => (client, server),
-        Direction::ServerToClient => (server, client),
-    }
-}
-
-/// Experimental, exact-host routing policy. Never accept a range or a user-chosen
-/// destination; the synthetic egress host lives in a third isolated namespace.
-fn routed_addresses(dir: Direction) -> (IpAddr, IpAddr) {
-    match dir {
-        Direction::ClientToServer => (
-            IpAddr::V4(Ipv4Addr::new(10, 77, 0, 2)),
-            IpAddr::V4(Ipv4Addr::new(10, 88, 0, 10)),
-        ),
-        Direction::ServerToClient => (
-            IpAddr::V4(Ipv4Addr::new(10, 88, 0, 10)),
-            IpAddr::V4(Ipv4Addr::new(10, 77, 0, 2)),
-        ),
-    }
-}
-
-fn routed_addresses_v6(dir: Direction) -> (Ipv6Addr, Ipv6Addr) {
-    let client: Ipv6Addr = "fd42:fed0::2".parse().expect("constant client IPv6");
-    let egress: Ipv6Addr = "fd42:fed1::10".parse().expect("constant egress IPv6");
-    match dir {
-        Direction::ClientToServer => (client, egress),
-        Direction::ServerToClient => (egress, client),
-    }
-}
-
-/// Reject untrusted traffic that could inject/escape outside the lab pair.
-/// Validity here means *framing, IP length and peer addresses*, not full
-/// checksums or protocol correctness: kernel verifies those after TUN injection.
-fn valid_ip(packet: &[u8], dir: Direction) -> bool {
-    if packet.len() < 20 || packet.len() > MAX_PACKET {
-        return false;
-    }
-    match packet[0] >> 4 {
-        4 => {
-            if packet.len() < 20 {
-                return false;
-            }
-            let header = ((packet[0] & 15) as usize) * 4;
-            if header < 20 || header > packet.len() {
-                return false;
-            }
-            let total = u16::from_be_bytes([packet[2], packet[3]]) as usize;
-            if total != packet.len() {
-                return false;
-            }
-            // Disallow fragmentation until fragment state accounting is defined.
-            let flags_frag = u16::from_be_bytes([packet[6], packet[7]]);
-            if flags_frag & 0x3fff != 0 {
-                return false;
-            }
-            let src = IpAddr::V4(Ipv4Addr::new(
-                packet[12], packet[13], packet[14], packet[15],
-            ));
-            let dst = IpAddr::V4(Ipv4Addr::new(
-                packet[16], packet[17], packet[18], packet[19],
-            ));
-            let expected = addresses(dir);
-            (src == expected.0 && dst == expected.1) || {
-                let routed = routed_addresses(dir);
-                src == routed.0 && dst == routed.1
-            }
-        }
-        6 => {
-            if packet.len() < 40 {
-                return false;
-            }
-            let payload = u16::from_be_bytes([packet[4], packet[5]]) as usize;
-            if payload + 40 != packet.len() {
-                return false;
-            }
-            let src = Ipv6Addr::from(<[u8; 16]>::try_from(&packet[8..24]).expect("length checked"));
-            let dst =
-                Ipv6Addr::from(<[u8; 16]>::try_from(&packet[24..40]).expect("length checked"));
-            (src, dst) == addresses_v6(dir) || (src, dst) == routed_addresses_v6(dir)
-        }
-        _ => false,
     }
 }
 
@@ -289,13 +184,15 @@ where
         Direction::ClientToServer
     };
     let (mut incoming, mut outgoing) = tokio::io::split(stream);
+    // The identical OS-independent packet ACL is used in all transport modes.
+    let policy = IpPolicy::isolated_lab();
     let rx_tun = tun.clone();
     let tx_tun = tun;
     let send = async {
         let mut packet = vec![0u8; TUN_BUFFER];
         loop {
             let n = rx_tun.recv(&mut packet).await?;
-            if !valid_ip(&packet[..n], out_dir) {
+            if !policy.admits(&packet[..n], out_dir) {
                 continue;
             }
             let frame = Frame::new(FrameKind::Datagram, STREAM, packet[..n].to_vec())?;
@@ -310,7 +207,7 @@ where
             if frame.kind != FrameKind::Datagram || frame.stream_id != STREAM {
                 return Err("unexpected frame in active IP tunnel".into());
             }
-            if !valid_ip(&frame.payload, in_dir) {
+            if !policy.admits(&frame.payload, in_dir) {
                 return Err("invalid or spoofed IP packet from peer".into());
             }
             tx_tun.send_all(&frame.payload).await?;
@@ -658,98 +555,15 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn ipv4_packet(source: [u8; 4], dest: [u8; 4]) -> Vec<u8> {
-        let mut p = vec![0u8; 28];
-        p[0] = 0x45;
-        p[2..4].copy_from_slice(&(28u16).to_be_bytes());
-        p[8] = 64;
-        p[9] = 1;
-        p[12..16].copy_from_slice(&source);
-        p[16..20].copy_from_slice(&dest);
-        p
-    }
-    fn ipv6_packet(source: Ipv6Addr, dest: Ipv6Addr) -> Vec<u8> {
-        let mut p = vec![0u8; 48];
-        p[0] = 0x60;
-        p[4..6].copy_from_slice(&(8u16).to_be_bytes());
-        p[6] = 58;
-        p[7] = 64;
-        p[8..24].copy_from_slice(&source.octets());
-        p[24..40].copy_from_slice(&dest.octets());
-        p
-    }
 
     #[test]
-    fn ipv4_valid_lengths_and_directions() {
-        let mut pkt = ipv4_packet([10, 77, 0, 2], [10, 77, 0, 1]);
-        assert!(valid_ip(&pkt, Direction::ClientToServer));
-        assert!(!valid_ip(&pkt, Direction::ServerToClient));
-        pkt[2] = 0;
-        pkt[3] = 27;
-        assert!(!valid_ip(&pkt, Direction::ClientToServer));
-        pkt[2] = 0;
-        pkt[3] = 28;
-        pkt[6] = 0x20; // disallowed fragmented source
-        assert!(!valid_ip(&pkt, Direction::ClientToServer));
-    }
-
-    #[test]
-    fn blocks_ip_spoofing_unknown_version_and_oversized_packets() {
-        let bad = ipv4_packet([198, 51, 100, 1], [10, 77, 0, 1]);
-        assert!(!valid_ip(&bad, Direction::ClientToServer));
-        let mut wrong = ipv4_packet([10, 77, 0, 2], [10, 77, 0, 1]);
-        wrong[0] = 0x75;
-        assert!(!valid_ip(&wrong, Direction::ClientToServer));
-        assert!(!valid_ip(
-            &vec![0u8; MAX_PACKET + 1],
-            Direction::ClientToServer
-        ));
-    }
-
-    #[test]
-    fn ipv6_pairs_and_lengths() {
-        let (src, dst) = addresses_v6(Direction::ClientToServer);
-        let mut packet = ipv6_packet(src, dst);
-        assert!(valid_ip(&packet, Direction::ClientToServer));
-        assert!(!valid_ip(&packet, Direction::ServerToClient));
-        packet[4] = 0;
-        packet[5] = 7;
-        assert!(!valid_ip(&packet, Direction::ClientToServer));
-    }
-
-    #[test]
-    fn routed_egress_exact_host_only_ipv4() {
-        let out = ipv4_packet([10, 77, 0, 2], [10, 88, 0, 10]);
-        assert!(valid_ip(&out, Direction::ClientToServer));
-        assert!(!valid_ip(&out, Direction::ServerToClient));
-        let reply = ipv4_packet([10, 88, 0, 10], [10, 77, 0, 2]);
-        assert!(valid_ip(&reply, Direction::ServerToClient));
-        let forbidden_host = ipv4_packet([10, 77, 0, 2], [10, 88, 0, 11]);
-        assert!(!valid_ip(&forbidden_host, Direction::ClientToServer));
-        let public = ipv4_packet([10, 77, 0, 2], [1, 1, 1, 1]);
-        assert!(!valid_ip(&public, Direction::ClientToServer));
-    }
-
-    #[test]
-    fn routed_egress_exact_host_only_ipv6() {
-        let (src, dst) = routed_addresses_v6(Direction::ClientToServer);
-        assert!(valid_ip(&ipv6_packet(src, dst), Direction::ClientToServer));
-        assert!(!valid_ip(&ipv6_packet(src, dst), Direction::ServerToClient));
-        let (reverse_src, reverse_dst) = routed_addresses_v6(Direction::ServerToClient);
-        assert!(valid_ip(
-            &ipv6_packet(reverse_src, reverse_dst),
-            Direction::ServerToClient
-        ));
-        let unauthorized: Ipv6Addr = "fd42:fed1::11".parse().unwrap();
-        assert!(!valid_ip(
-            &ipv6_packet(src, unauthorized),
-            Direction::ClientToServer
-        ));
+    fn lab_tun_mtu_agrees_with_portable_acl() {
+        assert_eq!(MAX_PACKET, IpPolicy::isolated_lab().mtu());
     }
 
     #[test]
     fn rejects_unexpected_open_frames() {
-        let bad = Frame::new(FrameKind::Datagram, 1, vec![]).unwrap();
-        assert!(expect_open(bad).is_err());
+        let wrong = Frame::new(FrameKind::Datagram, 1, vec![]).unwrap();
+        assert!(expect_open(wrong).is_err());
     }
 }
