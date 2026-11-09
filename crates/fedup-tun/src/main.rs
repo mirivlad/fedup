@@ -190,11 +190,10 @@ fn valid_ip(packet: &[u8], dir: Direction) -> bool {
                 packet[16], packet[17], packet[18], packet[19],
             ));
             let expected = addresses(dir);
-            (src == expected.0 && dst == expected.1)
-                || {
-                    let routed = routed_addresses(dir);
-                    src == routed.0 && dst == routed.1
-                }
+            (src == expected.0 && dst == expected.1) || {
+                let routed = routed_addresses(dir);
+                src == routed.0 && dst == routed.1
+            }
         }
         6 => {
             if packet.len() < 40 {
