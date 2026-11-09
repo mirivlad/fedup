@@ -35,6 +35,8 @@
 
 ## Experimental laboratory
 
+An Android Kotlin **diagnostic-only** shell and its arm64 JNI adapter now exist (see [Russian Android guide](docs/ru/android.md) and [English guide](docs/android.md)); it deliberately cannot connect or establish TUN until server auth, identity, DNS and routes are verified.
+
 The current implementation includes an OS-independent **fedup-core** IP packet ACL (cross-checked for Windows GNU and Android ARM64 Rust targets), a separate namespace-only **fedup-netguard** privileged nftables policy helper, and a Linux TUN IP-packet laboratory with a third isolated routed/DNS endpoint (docs/tun.md), a genuine HTTP/2 streaming laboratory, also bridged into the isolated TUN modes server-h2/client-h2 (docs/http2.md), alongside a dependency-free Rust framing codec, a one-shot **loopback-only** mTLS 1.3 Ping/Pong lab, and an experimental **single-destination TCP forwarder**. The forwarder requires mutually authenticated TLS, an explicit device certificate allowlist and a fixed operator-configured target. The Linux fedup-admin CLI can initialize, list, add and revoke those allowed certificate fingerprints with atomic file updates. A new fedup-device CLI creates **encrypted client keys and signed CSRs** locally, verifies issued certificates, and fedup-link client-device uses enrollment-pinned server trust. It is not a full VPN, web protocol, or production-ready Internet-facing server.
 
 On Linux with the Rust toolchain, OpenSSL and Python 3:

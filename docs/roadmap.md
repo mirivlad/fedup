@@ -36,7 +36,7 @@
 
 ## Milestone M3: Android client
 
-- [ ] Kotlin `VpnService` bridge to shared Rust core. *(The new OS-independent `fedup-core` packet admission is compiled in CI for Android ARM64; there is no Kotlin/VpnService integration yet.)*
+- [ ] Kotlin `VpnService` bridge to shared Rust core. *(A diagnostic Kotlin VpnService declaration and Rust arm64 JNI bridge now use the shared `fedup-core` packet admission; Android Gradle/NDK CI checks these pieces, but **no authenticated transport, TUN forwarding or functional VPN exists**. Always-on is deliberately disabled.)*
 - [ ] Per-app allow-list and explicit kill-switch behavior.
 - [ ] Signed APK, device enrollment QR, background operation and roaming tests.
 - [ ] Clear disclosure that apps may detect VPN state on Android.
