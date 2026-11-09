@@ -1,7 +1,9 @@
 //! One-shot loopback mTLS echo laboratory. Not a tunnel and not production ready.
 use fedup_protocol::{read_frame, write_frame, Frame, FrameKind};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
-use rustls::{ClientConfig, ClientConnection, RootCertStore, ServerConfig, ServerConnection, StreamOwned};
+use rustls::{
+    ClientConfig, ClientConnection, RootCertStore, ServerConfig, ServerConnection, StreamOwned,
+};
 use std::env;
 use std::error::Error;
 use std::fs::File;
@@ -27,8 +29,7 @@ fn load_certs(path: &Path) -> LabResult<Vec<CertificateDer<'static>>> {
 
 fn load_key(path: &Path) -> LabResult<PrivateKeyDer<'static>> {
     let mut reader = BufReader::new(File::open(path)?);
-    Ok(rustls_pemfile::private_key(&mut reader)?
-        .ok_or("private key not found in PEM file")?)
+    Ok(rustls_pemfile::private_key(&mut reader)?.ok_or("private key not found in PEM file")?)
 }
 
 fn load_roots(path: &Path) -> LabResult<RootCertStore> {
@@ -45,24 +46,22 @@ fn with_timeouts(stream: &TcpStream) -> io::Result<()> {
     Ok(())
 }
 
-fn serve_once(
-    addr: &str,
-    ca: &Path,
-    certificate: &Path,
-    key: &Path,
-) -> LabResult<()> {
+fn serve_once(addr: &str, ca: &Path, certificate: &Path, key: &Path) -> LabResult<()> {
     // This experimental implementation must never be offered as an Internet service.
     let addr: SocketAddr = addr.parse()?;
     if !addr.ip().is_loopback() {
         return Err("lab server only accepts loopback addresses; not a public VPN".into());
     }
-    let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(load_roots(ca)?))
-        .build()?;
+    let verifier =
+        rustls::server::WebPkiClientVerifier::builder(Arc::new(load_roots(ca)?)).build()?;
     let config = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
         .with_client_cert_verifier(verifier)
         .with_single_cert(load_certs(certificate)?, load_key(key)?)?;
     let listener = TcpListener::bind(addr)?;
-    println!("FedUp mTLS lab listening on {} (one connection only)", listener.local_addr()?);
+    println!(
+        "FedUp mTLS lab listening on {} (one connection only)",
+        listener.local_addr()?
+    );
     let (socket, _) = listener.accept()?;
     with_timeouts(&socket)?;
     let connection = ServerConnection::new(Arc::new(config))?;
@@ -70,7 +69,8 @@ fn serve_once(
 
     // rustls enforces mutual certificate verification before yielding application data.
     let frame = read_frame(&mut tls)?;
-    if frame.kind != FrameKind::Ping || frame.stream_id != 0 || frame.payload.len() > MAX_PING_BYTES {
+    if frame.kind != FrameKind::Ping || frame.stream_id != 0 || frame.payload.len() > MAX_PING_BYTES
+    {
         return Err("lab only accepts one Ping with at most 64 bytes".into());
     }
     let reply = Frame::new(FrameKind::Pong, 0, frame.payload)?;
@@ -107,9 +107,11 @@ fn send_once(
 }
 
 fn usage() {
-    eprintln!("FedUp lab (not a VPN):\n\
+    eprintln!(
+        "FedUp lab (not a VPN):\n\
       fedup-lab server 127.0.0.1:7443 <ca.pem> <server-cert.pem> <server-key.pem>\n\
-      fedup-lab client 127.0.0.1:7443 localhost <ca.pem> <client-cert.pem> <client-key.pem>");
+      fedup-lab client 127.0.0.1:7443 localhost <ca.pem> <client-cert.pem> <client-key.pem>"
+    );
 }
 
 fn run() -> LabResult<()> {
@@ -119,9 +121,13 @@ fn run() -> LabResult<()> {
         [_, mode, addr, ca, cert, key] if mode == "server" => {
             serve_once(addr, Path::new(ca), Path::new(cert), Path::new(key))
         }
-        [_, mode, addr, server_name, ca, cert, key] if mode == "client" => {
-            send_once(addr, server_name, Path::new(ca), Path::new(cert), Path::new(key))
-        }
+        [_, mode, addr, server_name, ca, cert, key] if mode == "client" => send_once(
+            addr,
+            server_name,
+            Path::new(ca),
+            Path::new(cert),
+            Path::new(key),
+        ),
         _ => {
             usage();
             Err("invalid command-line arguments".into())
