@@ -278,6 +278,19 @@ fn install(policy: &Policy) -> Result<()> {
     Ok(())
 }
 
+/// Safe idempotent boot/restart entry point: reuse an existing table only if
+/// *all* expected rules are identical. Never flush or replace a modified policy.
+fn ensure(policy: &Policy) -> Result<()> {
+    let existing = run_nft(&["list", "table", "inet", TABLE], None)?;
+    if existing.status.success() {
+        verify(policy)?;
+        println!("FedUp netguard already installed; exact policy verified");
+        Ok(())
+    } else {
+        install(policy)
+    }
+}
+
 fn remove(policy: &Policy) -> Result<()> {
     // Explicit operator operation, and only if exact rule integrity is proven.
     verify(policy)?;
@@ -291,6 +304,7 @@ fn usage() {
         "Lab-only netguard; MUST run inside an isolated Linux network namespace:\n\
          fedup-netguard plan <policy.json>\n\
          fedup-netguard install <policy.json>\n\
+         fedup-netguard ensure <policy.json>\n\
          fedup-netguard verify <policy.json>\n\
          fedup-netguard remove <policy.json> --confirm-lab-remove\n\
          No changes to host routes, firewall or DNS are authorized."
@@ -312,15 +326,19 @@ fn run() -> Result<()> {
             println!("{}", policy.install_batch());
             Ok(())
         }
-        [_, action, path] if action == "install" || action == "verify" => {
+        [_, action, path]
+            if action == "install" || action == "ensure" || action == "verify" =>
+        {
             isolated()?;
             let policy = load(Path::new(path))?;
-            if action == "install" {
-                install(&policy)
-            } else {
-                verify(&policy)?;
-                println!("FedUp laboratory netguard policy integrity: PASS");
-                Ok(())
+            match action.as_str() {
+                "install" => install(&policy),
+                "ensure" => ensure(&policy),
+                _ => {
+                    verify(&policy)?;
+                    println!("FedUp laboratory netguard policy integrity: PASS");
+                    Ok(())
+                }
             }
         }
         [_, action, path, confirmation]
