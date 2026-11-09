@@ -2,7 +2,6 @@ package top.mirv.fedup.android
 
 import android.content.Intent
 import android.net.VpnService
-import android.os.IBinder
 
 /**
  * Service declaration/lifecycle scaffold only. Intentionally fail closed:
@@ -24,6 +23,4 @@ class FedUpVpnService : VpnService() {
         stopSelf()
         super.onRevoke()
     }
-
-    override fun onBind(intent: Intent?): IBinder? = super.onBind(intent)
 }
