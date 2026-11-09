@@ -11,7 +11,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Json as JsonResponse;
 use axum::Router;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 mod issuer;
 use issuer::LabIssuer;
@@ -99,20 +99,20 @@ fn reply(status: StatusCode) -> impl IntoResponse {
     )
 }
 
-async fn login(State(state): State<Arc<App>>, Json(input): Json<Login>) -> impl IntoResponse {
+async fn password_valid(state: &Arc<App>, input: Login) -> std::result::Result<bool, StatusCode> {
     if input.username.len() > 48
         || input.password.len() > 128
         || input.username.is_empty()
         || input.password.is_empty()
     {
-        return reply(StatusCode::UNAUTHORIZED);
+        return Err(StatusCode::UNAUTHORIZED);
     }
     if !state.attempts.lock().await.allow(&input.username) {
-        return reply(StatusCode::TOO_MANY_REQUESTS);
+        return Err(StatusCode::TOO_MANY_REQUESTS);
     }
     // Do not queue an unbounded number of password hashes.
     let Ok(permit) = state.workers.clone().try_acquire_owned() else {
-        return reply(StatusCode::TOO_MANY_REQUESTS);
+        return Err(StatusCode::TOO_MANY_REQUESTS);
     };
     let user = input.username;
     let password = Zeroizing::new(input.password.into_bytes());
@@ -123,18 +123,49 @@ async fn login(State(state): State<Arc<App>>, Json(input): Json<Login>) -> impl 
         result
     })
     .await;
-    if matches!(result, Ok(Ok(true))) {
-        reply(StatusCode::NO_CONTENT)
-    } else {
-        reply(StatusCode::UNAUTHORIZED)
+    Ok(matches!(result, Ok(Ok(true))))
+}
+
+async fn login(State(state): State<Arc<App>>, Json(input): Json<Login>) -> impl IntoResponse {
+    match password_valid(&state, input).await {
+        Ok(true) => reply(StatusCode::NO_CONTENT),
+        Ok(false) | Err(StatusCode::UNAUTHORIZED) => reply(StatusCode::UNAUTHORIZED),
+        Err(code) => reply(code),
     }
 }
 
-async fn enrollment_config(State(state): State<Arc<App>>) -> Response {
+/// Do not disclose device CA or transport mode to anonymous active probes.
+/// Requires the SAME login/password as enrollment and uses the shared rate cap.
+#[derive(Serialize)]
+struct AuthenticatedConfig {
+    #[serde(flatten)]
+    device_ca: issuer::PublicConfig,
+    transport: &'static str,
+    tunnel_port: u16,
+}
+
+async fn enrollment_config(
+    State(state): State<Arc<App>>,
+    Json(input): Json<Login>,
+) -> Response {
     let Some(issuer) = &state.issuer else {
         return reply(StatusCode::SERVICE_UNAVAILABLE).into_response();
     };
-    let mut response = JsonResponse(issuer.public_config()).into_response();
+    match password_valid(&state, input).await {
+        Ok(true) => {}
+        Err(StatusCode::TOO_MANY_REQUESTS) => {
+            return reply(StatusCode::TOO_MANY_REQUESTS).into_response();
+        }
+        _ => return reply(StatusCode::NOT_FOUND).into_response(),
+    }
+    // Enable only when the administrator has configured Caddy and the
+    // loopback h2c gateway. Never infer readiness from this environment flag.
+    let stealth = env::var("FEDUP_VPN_PROOF_EDGE").ok().as_deref() == Some("1");
+    let mut response = JsonResponse(AuthenticatedConfig {
+        device_ca: issuer.public_config(),
+        transport: if stealth { "app-proof" } else { "mtls" },
+        tunnel_port: if stealth { 443 } else { 7443 },
+    }).into_response();
     response.headers_mut().insert(
         header::CACHE_CONTROL,
         axum::http::HeaderValue::from_static("no-store"),
@@ -239,7 +270,10 @@ fn app(users: PathBuf, issuer: Option<LabIssuer>) -> Router {
             "/api/fedup/v1/devices",
             post(enroll_device).layer(DefaultBodyLimit::max(16 * 1024)),
         )
-        .route("/api/fedup/v1/config", get(enrollment_config))
+        .route("/api/fedup/v1/config",
+            post(enrollment_config)
+                .get(|| async { StatusCode::NOT_FOUND })
+                .layer(DefaultBodyLimit::max(2048)))
         .with_state(Arc::new(App::new(users, issuer)))
 }
 
