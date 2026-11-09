@@ -203,6 +203,17 @@ assert source[0]=="1.1.1.1",source
 print("UDP/53 over VPN NAT: PASS")
 PY
 echo "IPv4 public destination ping + TCP HTTP + UDP DNS through FedUp HTTP/2 NAT: PASS"
+# Active uncredentialed HTTP/TLS probe from the same synthetic client subnet:
+# the VPN gateway must not authorize it, and the established device tunnel
+# must remain usable. This is a security check, NOT proof of camouflage.
+if timeout 6 ip netns exec "$CN" curl -kfsS --noproxy '*' \
+    --connect-timeout 2 --max-time 4 \
+    "https://172.31.44.1:7443/fedup-lab/v1/auth-check" >/dev/null 2>&1; then
+  echo "FAIL: anonymous TLS/HTTP probe was admitted to protected endpoint" >&2
+  exit 1
+fi
+timeout 6 ip netns exec "$CN" ping -n -c 1 -W 2 9.9.9.9 >/dev/null
+echo "Active anonymous probe denied; authenticated tunnel still routes packets: PASS"
 # Account disable should close a live tunnel in <= 5 seconds.
 "$USERS" disable "$TMP/users" phone
 sleep 7
