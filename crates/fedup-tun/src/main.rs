@@ -318,6 +318,10 @@ async fn h2_server_session(
                 .body(())?,
             true,
         )?;
+        // h2 queues HEADERS. Drive its connection state machine before
+        // closing TLS, otherwise the client sees a reset instead of 204.
+        connection.graceful_shutdown();
+        let _ = timeout(Duration::from_secs(2), connection.accept()).await;
         return Ok(());
     }
     if !is_h2_request(&request) {
