@@ -72,11 +72,13 @@ impl IpPolicy {
         }
         let mut v4 = HashSet::new();
         let mut v6 = HashSet::new();
-        if peers_v4.iter().any(|address| {
-            !valid_v4(*address) || *address == client_v4 || !v4.insert(*address)
-        }) || peers_v6.iter().any(|address| {
-            !valid_v6(*address) || *address == client_v6 || !v6.insert(*address)
-        }) {
+        if peers_v4
+            .iter()
+            .any(|address| !valid_v4(*address) || *address == client_v4 || !v4.insert(*address))
+            || peers_v6
+                .iter()
+                .any(|address| !valid_v6(*address) || *address == client_v6 || !v6.insert(*address))
+        {
             return Err(PolicyError::DuplicateOrInvalidPeer);
         }
         Ok(Self {
@@ -132,12 +134,8 @@ impl IpPolicy {
         let src = Ipv4Addr::new(packet[12], packet[13], packet[14], packet[15]);
         let dst = Ipv4Addr::new(packet[16], packet[17], packet[18], packet[19]);
         match direction {
-            Direction::ClientToServer => {
-                src == self.client_v4 && self.peers_v4.contains(&dst)
-            }
-            Direction::ServerToClient => {
-                dst == self.client_v4 && self.peers_v4.contains(&src)
-            }
+            Direction::ClientToServer => src == self.client_v4 && self.peers_v4.contains(&dst),
+            Direction::ServerToClient => dst == self.client_v4 && self.peers_v4.contains(&src),
         }
     }
 
@@ -152,21 +150,14 @@ impl IpPolicy {
         // No IPv6 fragment/reassembly state exists yet. Reject extension
         // headers (including nested fragments), ESP, AH and routing headers
         // rather than accidentally accepting packets we cannot inspect.
-        if matches!(
-            packet[6],
-            0 | 43 | 44 | 50 | 51 | 60 | 135 | 139 | 140
-        ) {
+        if matches!(packet[6], 0 | 43 | 44 | 50 | 51 | 60 | 135 | 139 | 140) {
             return false;
         }
         let src = Ipv6Addr::from(<[u8; 16]>::try_from(&packet[8..24]).expect("length checked"));
         let dst = Ipv6Addr::from(<[u8; 16]>::try_from(&packet[24..40]).expect("length checked"));
         match direction {
-            Direction::ClientToServer => {
-                src == self.client_v6 && self.peers_v6.contains(&dst)
-            }
-            Direction::ServerToClient => {
-                dst == self.client_v6 && self.peers_v6.contains(&src)
-            }
+            Direction::ClientToServer => src == self.client_v6 && self.peers_v6.contains(&dst),
+            Direction::ServerToClient => dst == self.client_v6 && self.peers_v6.contains(&src),
         }
     }
 
@@ -184,10 +175,7 @@ impl IpPolicy {
 }
 
 fn valid_v4(ip: Ipv4Addr) -> bool {
-    !ip.is_unspecified()
-        && !ip.is_broadcast()
-        && !ip.is_multicast()
-        && !ip.is_loopback()
+    !ip.is_unspecified() && !ip.is_broadcast() && !ip.is_multicast() && !ip.is_loopback()
 }
 fn valid_v6(ip: Ipv6Addr) -> bool {
     !ip.is_unspecified() && !ip.is_multicast() && !ip.is_loopback()
@@ -260,7 +248,7 @@ mod tests {
     fn validates_ipv4_declared_lengths_options_and_fragment_flags() {
         let policy = IpPolicy::isolated_lab();
         let base = v4([10, 77, 0, 2], [10, 77, 0, 1]);
-        for (byte, value) in [(0, 0x46), (2, 0), (3, 27), (6, 0x20), (6, 0x80), (7, 1)] {
+        for (byte, value) in [(0, 0x46), (2, 1), (3, 27), (6, 0x20), (6, 0x80), (7, 1)] {
             let mut packet = base.clone();
             packet[byte] = value;
             assert!(!policy.admits(&packet, Direction::ClientToServer), "{byte} {value}");
@@ -308,21 +296,24 @@ mod tests {
             vec![Ipv4Addr::new(10, 77, 0, 1), Ipv4Addr::new(10, 77, 0, 1)],
             vec!["fd42:fed0::1".parse().unwrap()],
             LAB_MTU
-        ).is_err());
+        )
+        .is_err());
         assert!(IpPolicy::new(
             Ipv4Addr::new(10, 77, 0, 2),
             "fd42:fed0::2".parse().unwrap(),
             vec![Ipv4Addr::new(10, 77, 0, 1)],
             vec![],
             LAB_MTU
-        ).is_err());
+        )
+        .is_err());
         assert!(IpPolicy::new(
             Ipv4Addr::UNSPECIFIED,
             "fd42:fed0::2".parse().unwrap(),
             vec![Ipv4Addr::new(10, 77, 0, 1)],
             vec!["fd42:fed0::1".parse().unwrap()],
             LAB_MTU
-        ).is_err());
+        )
+        .is_err());
     }
 
     #[test]
