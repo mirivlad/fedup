@@ -3,6 +3,8 @@
 //! This version forwards only packets between the fixed client and server,
 //! or a single synthetic egress host, inside operator-controlled network namespaces.
 
+mod proof;
+
 use bytes::Bytes;
 use fedup_core::{Direction, InternetV4Policy, IpPolicy, LAB_MTU};
 use fedup_identity::{decrypt_pkcs8, device_connection, read_password};
