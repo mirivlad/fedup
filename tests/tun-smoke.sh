@@ -12,6 +12,12 @@ TUN="$PWD/target/debug/fedup-tun"
 ENROLL="$PWD/target/debug/fedup-enroll"
 DEVICE="$PWD/target/debug/fedup-device"
 ADMIN="$PWD/target/debug/fedup-admin"
+MODE="${FEDUP_TUN_TRANSPORT:-raw}"
+case "$MODE" in
+  raw) SERVER_CMD="server"; CLIENT_CMD="client" ;;
+  h2) SERVER_CMD="server-h2"; CLIENT_CMD="client-h2" ;;
+  *) echo "Unknown FEDUP_TUN_TRANSPORT: $MODE" >&2; exit 2 ;;
+esac
 umask 077
 TMP="$(mktemp -d)"
 CN="fuc$"; SN="fus$"; EN="fue$"; CV="vfc$"; SV="vfs$"; SE="vse$"; EV="vee$"
@@ -102,7 +108,7 @@ if ip -n "$CN" route get 1.1.1.1 >/dev/null 2>&1; then
   echo "FAIL: test namespace has external route" >&2; exit 1
 fi
 
-ip netns exec "$SN" "$TUN" server 172.31.44.1:7443 futserver \
+ip netns exec "$SN" "$TUN" "$SERVER_CMD" 172.31.44.1:7443 futserver \
   "$TMP/ca.pem" "$TMP/server.pem" "$TMP/server.key" "$TMP/allowed.txt" \
   >"$TMP/server.log" 2>&1 &
 PIDS="$PIDS $!"
@@ -116,7 +122,7 @@ fi
 ip -n "$SN" addr add 10.77.0.1/30 dev futserver
 ip -n "$SN" -6 addr add fd42:fed0::1/64 dev futserver
 
-printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" client \
+printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" "$CLIENT_CMD" \
   172.31.44.1:7443 futclient "$TMP/identity" --passphrase-stdin \
   >"$TMP/client.log" 2>&1 &
 PIDS="$PIDS $!"
@@ -270,4 +276,4 @@ if timeout 4 ip netns exec "$CN" ping -n -c 1 -W 1 10.88.0.10 >/dev/null 2>&1; t
   echo "FAIL: revoked client still reaches synthetic egress" >&2; exit 1
 fi
 echo "Revocation, routed-egress cut-off and no external-route fallback: PASS"
-echo "FedUp Linux TUN namespace lab: PASS"
+echo "FedUp Linux TUN namespace lab ($MODE): PASS"
