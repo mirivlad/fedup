@@ -310,9 +310,7 @@ async fn h2_server_session(
     // and the server's per-device certificate fingerprint authorization.
     // This path never creates a new TUN or forwards any packet. Android
     // can validate its full offline enrollment chain without routing traffic.
-    if request.method() == http::Method::GET
-        && request.uri().path() == "/fedup-lab/v1/auth-check"
-    {
+    if request.method() == http::Method::GET && request.uri().path() == "/fedup-lab/v1/auth-check" {
         respond.send_response(
             Response::builder()
                 .status(StatusCode::NO_CONTENT)
