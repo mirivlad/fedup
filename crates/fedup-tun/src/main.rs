@@ -91,6 +91,18 @@ enum Direction {
     ServerToClient,
 }
 
+/// Extra laboratory safeguard: refuse to start in the initial network
+/// namespace of the current Linux instance. This does not replace a
+/// sandbox or a privilege separation policy.
+fn require_isolated_network_namespace() -> Result<()> {
+    let current = fs::read_link("/proc/self/ns/net")?;
+    let init = fs::read_link("/proc/1/ns/net")?;
+    if current == init {
+        return Err("experimental IP TUN may only run inside a separate Linux network namespace".into());
+    }
+    Ok(())
+}
+
 fn private_lab_ip(addr: SocketAddr) -> bool {
     match addr.ip() {
         IpAddr::V4(ip) => ip.is_private() || ip.is_loopback(),
@@ -322,6 +334,7 @@ async fn server(
     key: &Path,
     allowlist: &Path,
 ) -> Result<()> {
+    require_isolated_network_namespace()?;
     if !private_lab_ip(listen) {
         return Err("lab server must bind loopback or private IPv4 address".into());
     }
@@ -352,6 +365,7 @@ async fn client(
     directory: &Path,
     password_stdin: bool,
 ) -> Result<()> {
+    require_isolated_network_namespace()?;
     if !private_lab_ip(server) {
         return Err("lab client accepts only private IPv4 or loopback server address".into());
     }
