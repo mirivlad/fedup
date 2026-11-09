@@ -261,16 +261,38 @@ pub fn register_device(
 /// Idempotent registration for exactly the same signed CSR, user account
 /// revision and device label. If a response is lost the phone can safely
 /// retry using the same protected key instead of generating an orphan identity.
-pub fn register_signed_device(
-    dir: &Path,
-    username: &str,
+#[derive(Clone, Copy)]
+pub struct SignedDevice<'a> {
+    pub username: &'a str,
+    pub revision: i64,
+    pub label: &'a str,
+    pub csr_sha256: &'a str,
+    pub fingerprint: &'a str,
+    pub expires_at: i64,
+    pub certificate_pem: &'a str,
+}
+
+struct ExistingDevice {
+    csr_sha256: Option<String>,
+    certificate_pem: Option<String>,
+    fingerprint: String,
     revision: i64,
-    label: &str,
-    csr_sha256: &str,
-    fingerprint: &str,
     expires_at: i64,
-    certificate_pem: &str,
-) -> Result<(String, String)> {
+    disabled: bool,
+}
+
+/// Idempotent registration for the same CSR+account revision. A lost HTTP
+/// response does not strand the phone or accidentally issue a second cert.
+pub fn register_signed_device(dir: &Path, device: SignedDevice<'_>) -> Result<(String, String)> {
+    let SignedDevice {
+        username,
+        revision,
+        label,
+        csr_sha256,
+        fingerprint,
+        expires_at,
+        certificate_pem,
+    } = device;
     if !valid_username(username)
         || !valid_username(label)
         || csr_sha256.len() != 64
@@ -296,48 +318,55 @@ pub fn register_signed_device(
     if !active {
         return Err("account disabled or changed while signing".into());
     }
-    let existing: Option<(Option<String>, Option<String>, String, i64, i64, bool)> = tx
+    let existing = tx
         .query_row(
             "SELECT csr_sha256,certificate_pem,fingerprint,revision,expires_at,disabled
              FROM devices WHERE username=?1 AND label=?2",
             params![username, label],
             |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                ))
+                Ok(ExistingDevice {
+                    csr_sha256: row.get(0)?,
+                    certificate_pem: row.get(1)?,
+                    fingerprint: row.get(2)?,
+                    revision: row.get(3)?,
+                    expires_at: row.get(4)?,
+                    disabled: row.get(5)?,
+                })
             },
         )
         .optional()?;
-    if let Some((saved_csr, saved_cert, saved_fp, rev, expiry, disabled)) = existing {
-        if !disabled
-            && rev == revision
-            && expiry > unix_seconds()?
-            && saved_csr.as_deref() == Some(csr_sha256)
+    if let Some(saved) = existing {
+        if !saved.disabled
+            && saved.revision == revision
+            && saved.expires_at > unix_seconds()?
+            && saved.csr_sha256.as_deref() == Some(csr_sha256)
         {
-            let cert = saved_cert.ok_or("missing stored certificate for idempotent retry")?;
+            let cert = saved.certificate_pem.ok_or("missing certificate on safe retry")?;
             tx.commit()?;
-            return Ok((cert, saved_fp));
+            return Ok((cert, saved.fingerprint));
         }
-        return Err("device label already registered or no longer valid".into());
+        return Err("device label already in use or invalidated".into());
     }
-    let active_count: i64 = tx.query_row(
+    let count: i64 = tx.query_row(
         "SELECT COUNT(*) FROM devices WHERE username=?1 AND revision=?2 AND disabled=0",
         params![username, revision],
         |row| row.get(0),
     )?;
-    if active_count >= 8 {
+    if count >= 8 {
         return Err("eight-device limit reached".into());
     }
     tx.execute(
         "INSERT INTO devices(fingerprint,username,label,revision,expires_at,csr_sha256,certificate_pem)
          VALUES (?1,?2,?3,?4,?5,?6,?7)",
-        params![fingerprint.to_ascii_lowercase(),username,label,revision,expires_at,
-            csr_sha256.to_ascii_lowercase(),certificate_pem],
+        params![
+            fingerprint.to_ascii_lowercase(),
+            username,
+            label,
+            revision,
+            expires_at,
+            csr_sha256.to_ascii_lowercase(),
+            certificate_pem,
+        ],
     )?;
     tx.commit()?;
     Ok((certificate_pem.to_owned(), fingerprint.to_ascii_lowercase()))
@@ -673,40 +702,46 @@ mod tests {
         let fp = "af".repeat(32);
         let csr = "9f".repeat(32);
         let expiry = unix_seconds().unwrap() + 3600;
-        let cert = "-----BEGIN CERTIFICATE-----\\ntest\\n-----END CERTIFICATE-----";
-        let first =
-            register_signed_device(&dir, "family", rev, "android-1", &csr, &fp, expiry, cert)
-                .unwrap();
+        let cert = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----";
+        let request = SignedDevice {
+            username: "family",
+            revision: rev,
+            label: "android-1",
+            csr_sha256: &csr,
+            fingerprint: &fp,
+            expires_at: expiry,
+            certificate_pem: cert,
+        };
+        let first = register_signed_device(&dir, request).unwrap();
         let second = register_signed_device(
             &dir,
-            "family",
-            rev,
-            "android-1",
-            &csr,
-            &"b1".repeat(32),
-            expiry,
-            cert,
+            SignedDevice {
+                fingerprint: &"b1".repeat(32),
+                ..request
+            },
         )
         .unwrap();
         assert_eq!(first, second);
         assert!(authorized_device(&dir, &fp).unwrap());
         assert!(register_signed_device(
             &dir,
-            "family",
-            rev,
-            "android-1",
-            &"22".repeat(32),
-            &fp,
-            expiry,
-            cert
+            SignedDevice {
+                csr_sha256: &"22".repeat(32),
+                ..request
+            }
         )
         .is_err());
         change_password(&dir, "family", b"even-more-secure-new-passphrase").unwrap();
         assert!(!authorized_device(&dir, &fp).unwrap());
-        assert!(
-            register_signed_device(&dir, "family", rev, "android-2", &csr, &fp, expiry, cert)
-                .is_err()
-        );
+        assert!(register_signed_device(
+            &dir,
+            SignedDevice {
+                label: "android-2",
+                ..request
+            }
+        )
+        .is_err());
         fs::remove_dir_all(dir).unwrap();
     }
+
 }
