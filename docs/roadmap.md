@@ -16,7 +16,7 @@
 
 - [x] Rust workspace and `fedup-protocol` parser with strict frame-size limits and fuzz target.
 - [x] Experimental TLS-backed fixed-destination TCP link with server certificate validation and mTLS.
-- [ ] Per-device identity, short-lived enrollment and revocation. *(certificate fingerprint authorization, live revocation, SSH CLI and offline single-use CSR approval are implemented; secure CA-key handling, automatic enrollment and client-side key storage are pending)*
+- [ ] Per-device identity, short-lived enrollment and revocation. *(certificate fingerprint authorization, live revocation, SSH CLI, offline CSR approval, and local passphrase-encrypted PKCS#8 client keys are implemented; OS keystore, secure CA-key handling and automatic enrollment remain pending)*
 - [ ] Multiplexed TCP streams; explicit UDP semantics. *(one bounded TCP stream per TLS session implemented)*
 - [x] Linux command-line test client and isolated integration test (fixed target, not a full VPN).
 - [ ] Packet capture and network behavior measurement against baselines.

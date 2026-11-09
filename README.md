@@ -2,7 +2,7 @@
 
 **FedUp** is an early-stage, open-source project for a self-hosted, cross-platform private network tunnel for personal and family use.
 
-> Status: **early research with laboratory transport, administration and offline enrollment tools**. The Rust framing codec, one-shot mTLS lab, fixed-destination TCP forwarder, SSH-first device admin and offline invitation issuer are NOT a VPN or production-ready network service. Do not rely on this project for anonymity or security-critical connectivity.
+> Status: **early research with laboratory transport and encrypted Linux client identities**. The Rust framing codec, one-shot mTLS lab, fixed-destination TCP forwarder, SSH-first device admin, offline invitation issuer and encrypted Linux device identity are NOT a VPN or production-ready network service. Do not rely on this project for anonymity or security-critical connectivity.
 
 ## Goals
 
@@ -35,19 +35,20 @@
 
 ## Experimental laboratory
 
-The current implementation consists of a dependency-free Rust framing codec, a one-shot **loopback-only** mTLS 1.3 Ping/Pong lab, and an experimental **single-destination TCP forwarder**. The forwarder requires mutually authenticated TLS, an explicit device certificate allowlist and a fixed operator-configured target. The Linux fedup-admin CLI can initialize, list, add and revoke those allowed certificate fingerprints with atomic file updates. It is not a full VPN, web protocol, or production-ready Internet-facing server.
+The current implementation consists of a dependency-free Rust framing codec, a one-shot **loopback-only** mTLS 1.3 Ping/Pong lab, and an experimental **single-destination TCP forwarder**. The forwarder requires mutually authenticated TLS, an explicit device certificate allowlist and a fixed operator-configured target. The Linux fedup-admin CLI can initialize, list, add and revoke those allowed certificate fingerprints with atomic file updates. A new fedup-device CLI creates **encrypted client keys and signed CSRs** locally, verifies issued certificates, and fedup-link client-device uses enrollment-pinned server trust. It is not a full VPN, web protocol, or production-ready Internet-facing server.
 
 On Linux with the Rust toolchain, OpenSSL and Python 3:
 
 ```sh
 cargo test --workspace --all-targets
-cargo build -p fedup-lab -p fedup-link -p fedup-admin -p fedup-enroll
+cargo build -p fedup-lab -p fedup-link -p fedup-admin -p fedup-enroll -p fedup-identity
 bash tests/lab-smoke.sh
 bash tests/link-smoke.sh
 bash tests/enroll-smoke.sh
+bash tests/device-smoke.sh
 ```
 
-For parser fuzzing, install cargo-fuzz and run `cargo fuzz run frame_parser` from the `fuzz/` directory. See [offline enrollment (Russian)](docs/ru/enrollment.md), [offline enrollment reference](docs/enrollment.md), [SSH device administration (Russian)](docs/ru/admin.md), [admin reference](docs/admin.md), [lab instructions (Russian)](docs/ru/lab.md), [TCP link instructions (Russian)](docs/ru/tcp-link.md), [link design & limitations](docs/tcp-link.md) and [experimental wire framing](docs/protocol-v1.md).
+For parser fuzzing, install cargo-fuzz and run `cargo fuzz run frame_parser` from the `fuzz/` directory. See [encrypted Linux identity (Russian)](docs/ru/device.md), [device identity reference](docs/device.md), [offline enrollment (Russian)](docs/ru/enrollment.md), [offline enrollment reference](docs/enrollment.md), [SSH device administration (Russian)](docs/ru/admin.md), [admin reference](docs/admin.md), [lab instructions (Russian)](docs/ru/lab.md), [TCP link instructions (Russian)](docs/ru/tcp-link.md), [link design & limitations](docs/tcp-link.md) and [experimental wire framing](docs/protocol-v1.md).
 
 ## Read the design
 

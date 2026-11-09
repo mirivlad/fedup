@@ -23,7 +23,7 @@ Build on Linux with Rust, OpenSSL and Python 3:
 
 ~~~sh
 cargo test --workspace --all-targets
-cargo build -p fedup-link
+cargo build -p fedup-link -p fedup-identity
 bash tests/link-smoke.sh
 ~~~
 
@@ -32,10 +32,11 @@ The smoke script creates **temporary** test CA and certificates, starts a TCP ec
 ~~~text
 fedup-link fingerprint CLIENT_CERT.pem
 fedup-link server LISTEN_IP:PORT 127.0.0.1:TARGET_PORT ca.pem server.pem server.key allowlist.txt [--allow-public-bind]
-fedup-link client 127.0.0.1:CLIENT_PORT SERVER_IP:PORT SERVER_NAME ca.pem client.pem client.key
+fedup-link client 127.0.0.1:CLIENT_PORT SERVER_IP:PORT SERVER_NAME ca.pem client.pem client.key --unsafe-lab-plaintext-key
+fedup-link client-device 127.0.0.1:CLIENT_PORT SERVER_IP:PORT /path/to/imported-device-dir
 ~~~
 
-The allowlist contains one 64-character SHA-256 fingerprint of a client's DER leaf certificate per line. Blank and # comment lines are ignored. Missing, oversized or malformed allowlist files fail closed. The client SERVER_NAME must match the DNS Subject Alternative Name of the server certificate.
+The allowlist contains one 64-character SHA-256 fingerprint of a client's DER leaf certificate per line. Blank and # comment lines are ignored. Missing, oversized or malformed allowlist files fail closed. The client SERVER_NAME must match the DNS Subject Alternative Name of the server certificate. A newly enrolled client should instead use the client-device command, which reads the pinned server identity and CA certificate from its imported private identity directory. Unencrypted key files are allowed only under explicit unsafe-lab-plaintext-key for legacy test fixtures.
 
 For two Linux machines, arrange a **private lab network**, operator-issued certificates, a server listener on a known interface and the explicit non-loopback flag if required. The destination still must be a single loopback TCP address **on the server machine**. No automatic host firewall, invitation generation or certificate lifecycle management is implemented.
 

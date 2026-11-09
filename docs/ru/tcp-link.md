@@ -35,20 +35,28 @@ fedup-link server
 git clone https://github.com/mirivlad/fedup.git
 cd fedup
 cargo test --workspace --all-targets
-cargo build -p fedup-link -p fedup-admin
+cargo build -p fedup-link -p fedup-admin -p fedup-identity
 bash tests/link-smoke.sh
 ~~~
 
 Скрипт создаёт одноразовые сертификаты, запускает локальный echo-сервис, проверяет передачу данных и блокировку отозванного/чужого клиента, затем удаляет временные ключи.
 
-Синтаксис ручного запуска:
+Для зарегистрированного Linux-устройства предпочтительна команда client-device: она сама берёт имя сервера, доверенный CA и сертификат из каталога устройства, открывая зашифрованный ключ только в памяти:
+
+~~~bash
+target/debug/fedup-link client-device 127.0.0.1:8000 SERVER_IP:PORT ./my-device
+~~~
+
+Подробнее — в [инструкции по клиентским ключам](device.md).
+
+Синтаксис старого стендового запуска:
 
 ~~~text
 fedup-link fingerprint CLIENT_CERT.pem
 
 fedup-link server LISTEN_IP:PORT 127.0.0.1:TARGET_PORT ca.pem server.pem server.key allowlist.txt [--allow-public-bind]
 
-fedup-link client 127.0.0.1:CLIENT_PORT SERVER_IP:PORT SERVER_NAME ca.pem client.pem client.key
+fedup-link client 127.0.0.1:CLIENT_PORT SERVER_IP:PORT SERVER_NAME ca.pem client.pem client.key --unsafe-lab-plaintext-key
 ~~~
 
 Полное описание: [английская техническая документация](../tcp-link.md).
