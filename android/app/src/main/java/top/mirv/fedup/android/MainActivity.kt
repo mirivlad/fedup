@@ -137,6 +137,31 @@ class MainActivity : Activity() {
                 }
             }.start()
         }
+        label(layout, "3. Проверка взаимной TLS-аутентификации")
+        layout.addView(TextView(this).apply {
+            text = "Введите адрес FedUp-сервера и порт, например 192.168.1.10:7443. " +
+                "Имя TLS и доверенный CA берутся только из приглашения. " +
+                "Этот тест не создаёт VPN и не меняет маршруты."
+        })
+        val endpoint = EditText(this).apply {
+            hint = "server-address:7443"
+            setSingleLine(true)
+            filters = arrayOf(InputFilter.LengthFilter(253))
+        }
+        layout.addView(endpoint, ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT)
+        action(layout, "Проверить TLS 1.3, HTTP/2 и допуск устройства") {
+            val address = endpoint.text.toString().trim()
+            require(address.isNotBlank()) { "Введите адрес сервера" }
+            Thread {
+                try {
+                    val result = TlsProbe.check(enrollment, address)
+                    runOnUiThread { message(result) }
+                } catch (error: Exception) {
+                    runOnUiThread { message("Сервер не подтвердил устройство: " + error.message) }
+                }
+            }.start()
+        }
         label(layout, "Диагностика")
         action(layout, "Проверить Rust-ядро") {
             message(if (NativePacketPolicy.available())
