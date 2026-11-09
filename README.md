@@ -2,7 +2,7 @@
 
 **FedUp** is an early-stage, open-source project for a self-hosted, cross-platform private network tunnel for personal and family use.
 
-> Status: **research and design**. No usable VPN, production server, or client has been released. Do not deploy or rely on this project for security or anonymity.
+> Status: **early research with a running loopback-only laboratory**. The Rust framing codec and experimental mTLS Ping/Pong are NOT a VPN or a deployable network service. Do not rely on this project for anonymity or security-critical connectivity.
 
 ## Goals
 
@@ -32,6 +32,20 @@
 6. **Admin:** SSH/TUI first, optional private web interface.
 
 **Technology candidates:** Rust for core and server, Kotlin Android VPN bridge, and a cross-platform desktop GUI. These are design candidates, not implementation commitments yet.
+
+## Experimental laboratory
+
+The first implementation consists of a dependency-free Rust framing codec and a one-shot **loopback-only** mTLS 1.3 Ping/Pong laboratory. It is deliberately not a VPN, proxy, HTTP/2 transport or Internet-facing server.
+
+On Linux with the Rust toolchain, OpenSSL and Python 3:
+
+```sh
+cargo test --workspace --all-targets
+cargo build -p fedup-lab
+bash tests/lab-smoke.sh
+```
+
+For parser fuzzing, install cargo-fuzz and run `cargo fuzz run frame_parser` from the `fuzz/` directory. See [lab instructions (Russian)](docs/ru/lab.md) and [experimental wire framing](docs/protocol-v1.md).
 
 ## Read the design
 

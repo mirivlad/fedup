@@ -14,7 +14,7 @@
 
 ## Milestone M1: minimal authenticated Linux-to-Linux transport
 
-- [ ] Rust workspace and `fedup-protocol` parser with strict frame-size limits and fuzz target.
+- [x] Rust workspace and `fedup-protocol` parser with strict frame-size limits and fuzz target.
 - [ ] TLS-backed entry service with server certificate validation.
 - [ ] Per-device identity, short-lived enrollment and revocation.
 - [ ] Multiplexed TCP streams; explicit UDP semantics.
