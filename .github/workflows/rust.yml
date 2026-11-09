@@ -65,7 +65,7 @@ jobs:
       - name: Install Linux namespace test tools
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iproute2 iputils-ping libssl-dev pkg-config curl tcpdump
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iproute2 iputils-ping libssl-dev pkg-config curl tcpdump nftables
       - name: Build experimental TUN, enrollment and administration
         run: cargo build -p fedup-tun -p fedup-identity -p fedup-enroll -p fedup-admin
       - name: Verify isolated namespaces and parse synthetic TLS ClientHello
@@ -103,3 +103,7 @@ jobs:
           assert h2["offered_alpn"] == ["h2"], f"genuine HTTP/2 carrier did not offer h2: {h2}"
           print("Real HTTP/2 IP tunnel carried IPv4/IPv6 TCP/UDP/DNS and negotiated ALPN h2: PASS")
           PY
+      - name: Fault injection - direct-route kill switch and lossy raw TLS
+        run: sudo env FEDUP_TUN_TRANSPORT=raw FEDUP_TUN_FAULT=1 bash tests/tun-smoke.sh
+      - name: Fault injection - direct-route kill switch and lossy HTTP/2
+        run: sudo env FEDUP_TUN_TRANSPORT=h2 FEDUP_TUN_FAULT=1 bash tests/tun-smoke.sh
