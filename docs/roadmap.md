@@ -39,15 +39,15 @@
 - [x] SSH-first named accounts using salted Argon2id, user disable/enable, password rotation, private SQLite state.
 - [x] Local-only, rate-limited password validation API designed for a verified HTTPS reverse proxy.
 - [x] Android primary server/login/password screen, HTTPS-only authentication, encrypted remembered password using Android Keystore AES-GCM.
-- [ ] **Automatic first-login enrollment:** generate phone key, authorize by account, issue certificate via a protected delegated issuer, persist per-device record and enforce live revocation; remove manual CSR/PEM steps from user journey.
+- [ ] **Automatic first-login enrollment:** phone-generated Keystore key and automatic CSR/PEM import now work against an explicitly lab-only seven-day CA issuer; device owner/revision/fingerprint are stored and checked on every VPN session + every 5 seconds. **A protected delegated signer, renewal and device lifecycle remain pending before acceptance.**
 - [ ] Real server Android test: connection, IP routing, DNS/IPv6, background resume, emergency recovery, application upgrades.
-- [ ] Revoke all device sessions on user disable and password reset, not just future password checks.
+- [x] Revoke account-bound devices on user disable/password reset and recheck during active lab TUN sessions (5-second interval).
 
-**Current result:** HTTP 204 checks account credentials only. VPN data-plane still expects a device certificate and is not unlocked by password login.
+**Current result:** the Android three-field login now automatically registers a Keystore device certificate in the **unsafe lab issuer** mode, and the isolated Linux HTTP/2 VPN server can verify account-bound device fingerprints. **No full-tunnel, safe public signer or real-device acceptance yet.**
 
 ## Milestone M3: Android client
 
-- [ ] Kotlin `VpnService` bridge to shared Rust core. *(A diagnostic Kotlin VpnService declaration and Rust arm64 JNI bridge now use the shared `fedup-core` packet admission; Android Gradle/NDK CI checks these pieces, but **no authenticated transport, TUN forwarding or functional VPN exists**. Always-on is deliberately disabled.)*
+- [ ] Kotlin `VpnService` bridge to shared Rust core. *(Real lab-only TUN + mTLS/HTTP2 packet relay exists and automatic account-based certificate provisioning is implemented; only four fixed synthetic destinations route through it. **No production full-device VPN, DNS policy or real-phone integration acceptance yet.**)*
 - [ ] Per-app allow-list and explicit kill-switch behavior.
 - [ ] Signed APK, device enrollment QR, background operation and roaming tests.
 - [ ] Clear disclosure that apps may detect VPN state on Android.

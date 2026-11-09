@@ -4,15 +4,20 @@
 
 > Status: **experimental routed Linux IPv4/IPv6 TUN over raw TLS or genuine HTTP/2, with encrypted device identities**. The Rust framing codec, one-shot mTLS lab, fixed-destination TCP forwarder, SSH-first device admin, offline invitation issuer and encrypted Linux device identity are NOT a VPN or production-ready network service. Do not rely on this project for anonymity or security-critical connectivity.
 
-## Simple account login (first stage)
+## Simple account login and automatic device enrollment (LAB only)
 
-FedUp now has an experimental SSH-first user administration CLI and a loopback-only
-password authentication API for a trusted HTTPS reverse proxy. The Android primary
-screen asks for **server, username and password**; its remembered password is encrypted
-under Android Keystore AES-GCM. Manual certificate enrollment is hidden in advanced
-diagnostics. A successful login currently **checks account credentials only**, not VPN
-connectivity. Automatic device enrollment and account-bound revocation are still required.
-See [Russian account guide](docs/ru/accounts.md) and [English account guide](docs/accounts.md).
+FedUp now has SSH-first Argon2id user accounts and an experimental loopback-only
+provisioning API for an authenticated HTTPS reverse proxy. Android accepts **server,
+username and password**, creates a non-exportable Android Keystore device key, generates
+its own signed CSR and automatically verifies the seven-day client certificate.
+The experimental Linux HTTP/2 server can authorize those certificate fingerprints
+against the live user database and recheck revocation every five seconds.
+
+**Online signing is deliberately restricted to `--unsafe-lab-online-ca` with a
+disposable issuer. It is NOT safe for a real root CA or public VPS.** There is
+no full-tunnel Internet routing/DNS, production kill switch, real-phone verification
+or signed upgradeable Android release. See [Russian account guide](docs/ru/accounts.md)
+and [English guide](docs/accounts.md).
 
 ## Goals
 
@@ -69,6 +74,8 @@ sudo env FEDUP_TUN_TRANSPORT=h2 FEDUP_TUN_FAULT=1 bash tests/tun-smoke.sh
 bash tests/h2-smoke.sh
 # Login, password reset and disable checks in a disposable account database:
 bash tests/users-smoke.sh
+# Disposable P-256 CA + password -> signed CSR -> account revocation:
+bash tests/users-enroll-smoke.sh
 # Pure Python safety tests for repeated PCAP reports:
 python3 tools/test-traffic-study.py
 ```
