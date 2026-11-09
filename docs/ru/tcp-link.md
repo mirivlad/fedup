@@ -35,7 +35,7 @@ fedup-link server
 git clone https://github.com/mirivlad/fedup.git
 cd fedup
 cargo test --workspace --all-targets
-cargo build -p fedup-link
+cargo build -p fedup-link -p fedup-admin
 bash tests/link-smoke.sh
 ~~~
 
@@ -55,4 +55,6 @@ fedup-link client 127.0.0.1:CLIENT_PORT SERVER_IP:PORT SERVER_NAME ca.pem client
 
 **Не публикуй реальные сертификаты, ключи и адреса серверов.** Для ручной проверки на двух хостах используем частную лабораторную сеть, а не публичный рабочий VPS. Незаметность для DPI пока не измерялась. Сейчас это TLS-транспорт, но **не HTTPS**.
 
-Следующее: спецификация управления устройствами, безопасная выдача ключей, TCP/UDP сеансы, TUN, маршрутизация DNS/IPv4/IPv6 и нормальные клиенты.
+Добавлена [экспериментальная SSH-утилита для управления списком устройств](admin.md), но создание и выпуск ключей по приглашениям пока не реализованы.
+
+Следующее: безопасная выдача ключей, TCP/UDP сеансы, TUN, маршрутизация DNS/IPv4/IPv6 и нормальные клиенты.

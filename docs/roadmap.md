@@ -16,7 +16,7 @@
 
 - [x] Rust workspace and `fedup-protocol` parser with strict frame-size limits and fuzz target.
 - [x] Experimental TLS-backed fixed-destination TCP link with server certificate validation and mTLS.
-- [ ] Per-device identity, short-lived enrollment and revocation. *(certificate fingerprint authorization and live revocation exist; invitation enrollment is pending)*
+- [ ] Per-device identity, short-lived enrollment and revocation. *(certificate fingerprint authorization, live revocation and SSH CLI are implemented; automatic enrollment and issuance are pending)*
 - [ ] Multiplexed TCP streams; explicit UDP semantics. *(one bounded TCP stream per TLS session implemented)*
 - [x] Linux command-line test client and isolated integration test (fixed target, not a full VPN).
 - [ ] Packet capture and network behavior measurement against baselines.
@@ -27,7 +27,7 @@
 
 - [ ] TUN integration and route/DNS handling for IPv4 and IPv6.
 - [ ] Protection policy and network-failure leak tests.
-- [ ] Systemd service, DEB and straightforward SSH admin.
+- [ ] Systemd service, DEB and straightforward SSH admin. *(experimental SSH CLI is implemented; packaging, roles and managed enrollment pending)*
 - [ ] Stable config with documented backups and upgrades.
 
 **Exit:** usable and demonstrably fail-closed on a Linux test host.
