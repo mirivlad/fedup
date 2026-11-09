@@ -125,7 +125,7 @@ s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 s.bind(("1.1.1.1",53))
 while True:
     payload,peer=s.recvfrom(2048)
-    s.sendto(b"fedup-test-dns-reply:"+payload,peer)
+    s.sendto(b"fedup-test-dns-reply:"+payload+b"|seen-source="+peer[0].encode(),peer)
 ' >"$TMP/udp.log" 2>&1 &
 PIDS="$PIDS $!"
 ip netns exec "$SN" "$TUN" server-vps-v4 172.31.44.1:7443 \
@@ -182,7 +182,7 @@ s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 s.settimeout(4)
 s.sendto(b"example.test",("1.1.1.1",53))
 reply,source=s.recvfrom(1024)
-assert reply==b"fedup-test-dns-reply:example.test",reply
+assert reply==b"fedup-test-dns-reply:example.test|seen-source=172.31.55.1",reply
 assert source[0]=="1.1.1.1",source
 print("UDP/53 over VPN NAT: PASS")
 PY
