@@ -79,7 +79,6 @@ internal class LabTunnelSession(
             val fd = builder.establish()
                 ?: error("Android refused to establish the VPN interface")
             tun = fd
-            onReady()
 
             val read = FileInputStream(fd.fileDescriptor)
             val write = FileOutputStream(fd.fileDescriptor)
@@ -119,6 +118,9 @@ internal class LabTunnelSession(
                     "FedUp packet stream refused or downgraded, HTTP " + response.code
                 }
                 val input = response.body?.byteStream() ?: error("No HTTP/2 response body")
+                // A system TUN alone is not a connected VPN: report success
+                // only after the gateway confirms the actual HTTP/2 stream.
+                onReady()
                 while (!stopped) {
                     val packet = PacketCodec.receive(input) ?: error("Tunnel stream ended")
                     check(if (internetV4)
