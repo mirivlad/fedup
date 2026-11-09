@@ -382,7 +382,9 @@ async fn h2_server_session(
         Ok(permit) => permit,
         Err(_) => {
             respond.send_response(
-                Response::builder().status(StatusCode::TOO_MANY_REQUESTS).body(())?,
+                Response::builder()
+                    .status(StatusCode::TOO_MANY_REQUESTS)
+                    .body(())?,
                 true,
             )?;
             connection.graceful_shutdown();
@@ -508,10 +510,16 @@ async fn server_session(
     drop(handshake_slot);
     if mode.http2() {
         return h2_server_session(
-            tls, tun, (authorization.clone(), fp), mode.internet_v4(), active_session,
-        ).await;
+            tls,
+            tun,
+            (authorization.clone(), fp),
+            mode.internet_v4(),
+            active_session,
+        )
+        .await;
     }
-    let _active = active_session.try_acquire_owned()
+    let _active = active_session
+        .try_acquire_owned()
         .map_err(|_| "another IP session is already using the TUN")?;
     let req = read_frame(&mut tls).await?;
     expect_open(req)?;
@@ -590,8 +598,16 @@ async fn server(
         let active_session = active_session.clone();
         tokio::spawn(async move {
             if let Err(error) = server_session(
-                socket, acceptor, tun, &authorization, mode, active_session, slot,
-            ).await {
+                socket,
+                acceptor,
+                tun,
+                &authorization,
+                mode,
+                active_session,
+                slot,
+            )
+            .await
+            {
                 eprintln!("IP session closed: {error}");
             }
         });
