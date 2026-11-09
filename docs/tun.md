@@ -49,3 +49,7 @@ The applications exercised **different workloads**. TCP frame counts, flow durat
 The next experiment must use matched workloads, larger samples, negative tests and a real standards-compliant application protocol rather than false HTTP ALPN labels.
 
 A separate [standards-compliant HTTP/2 application lab](http2.md) is now integrated into fedup-tun in experimental server-h2/client-h2 mode. The same three-namespace IP/DNS/revocation tests pass on real HTTP/2 DATA streams, and CI asserts ALPN h2. Production hardening, performance, multi-device scaling and DPI behavior remain unverified.
+
+## Network failures and direct-route leak simulation
+
+The reproducible [fault laboratory](fault-testing.md) creates a working alternate direct route, then applies nftables only inside the disposable client namespace. Both raw TLS and real HTTP/2 pass 192 KiB binary TCP transfers with 1% emulated packet loss and 20 ms additional delay in each direction. After certificate revocation and client process termination, IPv4/IPv6 protected destinations remain blocked despite the alternate route. Successful CI: https://github.com/mirivlad/fedup/actions/runs/42572196063 . This is not a host-wide production kill switch or a performance ranking.

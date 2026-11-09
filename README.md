@@ -50,11 +50,14 @@ bash tests/device-smoke.sh
 sudo bash tests/tun-smoke.sh
 # The same routed IP/DNS tests over genuine HTTP/2:
 sudo env FEDUP_TUN_TRANSPORT=h2 bash tests/tun-smoke.sh
+# Emulated packet loss and demonstrable direct-bypass kill switch:
+sudo env FEDUP_TUN_TRANSPORT=raw FEDUP_TUN_FAULT=1 bash tests/tun-smoke.sh
+sudo env FEDUP_TUN_TRANSPORT=h2 FEDUP_TUN_FAULT=1 bash tests/tun-smoke.sh
 # Loopback HTTP/2 + mTLS streaming fixture:
 bash tests/h2-smoke.sh
 ```
 
-For parser fuzzing, install cargo-fuzz and run `cargo fuzz run frame_parser` from the `fuzz/` directory. See [genuine HTTP/2 research (Russian)](docs/ru/http2.md), [HTTP/2 operator reference](docs/http2.md), [IP tunnel + DPI research (Russian)](docs/ru/tun.md), [network observability](docs/tun.md), [encrypted Linux identity (Russian)](docs/ru/device.md), [device identity reference](docs/device.md), [offline enrollment (Russian)](docs/ru/enrollment.md), [offline enrollment reference](docs/enrollment.md), [SSH device administration (Russian)](docs/ru/admin.md), [admin reference](docs/admin.md), [lab instructions (Russian)](docs/ru/lab.md), [TCP link instructions (Russian)](docs/ru/tcp-link.md), [link design & limitations](docs/tcp-link.md) and [experimental wire framing](docs/protocol-v1.md).
+For parser fuzzing, install cargo-fuzz and run `cargo fuzz run frame_parser` from the `fuzz/` directory. See [fail-closed lab and network faults (Russian)](docs/ru/fault-testing.md), [network fault lab (English)](docs/fault-testing.md), [genuine HTTP/2 research (Russian)](docs/ru/http2.md), [HTTP/2 operator reference](docs/http2.md), [IP tunnel + DPI research (Russian)](docs/ru/tun.md), [network observability](docs/tun.md), [encrypted Linux identity (Russian)](docs/ru/device.md), [device identity reference](docs/device.md), [offline enrollment (Russian)](docs/ru/enrollment.md), [offline enrollment reference](docs/enrollment.md), [SSH device administration (Russian)](docs/ru/admin.md), [admin reference](docs/admin.md), [lab instructions (Russian)](docs/ru/lab.md), [TCP link instructions (Russian)](docs/ru/tcp-link.md), [link design & limitations](docs/tcp-link.md) and [experimental wire framing](docs/protocol-v1.md).
 
 ## Read the design
 
