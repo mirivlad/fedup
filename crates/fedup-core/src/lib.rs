@@ -386,24 +386,35 @@ mod tests {
     #[test]
     fn internet_ipv4_only_requires_phone_source_and_public_destination() {
         let internet = InternetV4Policy;
-        for remote in [[9,9,9,9], [1,1,1,1], [8,8,8,8]] {
-            assert!(internet.admits(&v4([10,77,0,2],remote), Direction::ClientToServer));
-            assert!(internet.admits(&v4(remote,[10,77,0,2]), Direction::ServerToClient));
-            assert!(!internet.admits(&v4(remote,[10,77,0,2]), Direction::ClientToServer));
+        for remote in [[9, 9, 9, 9], [1, 1, 1, 1], [8, 8, 8, 8]] {
+            assert!(internet.admits(&v4([10, 77, 0, 2], remote), Direction::ClientToServer));
+            assert!(internet.admits(&v4(remote, [10, 77, 0, 2]), Direction::ServerToClient));
+            assert!(!internet.admits(&v4(remote, [10, 77, 0, 2]), Direction::ClientToServer));
         }
-        for invalid in [[10,0,0,1], [192,168,1,1], [172,16,1,1],
-                        [127,0,0,1], [169,254,1,2], [100,64,0,1],
-                        [198,51,100,7], [203,0,113,1], [224,0,0,1],
-                        [0,0,0,0], [255,255,255,255]] {
-            assert!(!internet.admits(&v4([10,77,0,2],invalid), Direction::ClientToServer));
+        for invalid in [
+            [10, 0, 0, 1],
+            [192, 168, 1, 1],
+            [172, 16, 1, 1],
+            [127, 0, 0, 1],
+            [169, 254, 1, 2],
+            [100, 64, 0, 1],
+            [198, 51, 100, 7],
+            [203, 0, 113, 1],
+            [224, 0, 0, 1],
+            [0, 0, 0, 0],
+            [255, 255, 255, 255],
+        ] {
+            assert!(!internet.admits(&v4([10, 77, 0, 2], invalid), Direction::ClientToServer));
         }
-        assert!(!internet.admits(&v4([10,77,0,3],[9,9,9,9]), Direction::ClientToServer));
-        assert!(!internet.admits(&v4([9,9,9,9],[10,77,0,3]), Direction::ServerToClient));
-        let ipv6=v6("fd42:fed0::2".parse().unwrap(), "2606:4700:4700::1111".parse().unwrap());
-        assert!(!internet.admits(&ipv6,Direction::ClientToServer));
-        let mut fragmented = v4([10,77,0,2],[9,9,9,9]);
-        fragmented[6]=0x20;
-        assert!(!internet.admits(&fragmented,Direction::ClientToServer));
+        assert!(!internet.admits(&v4([10, 77, 0, 3], [9, 9, 9, 9]), Direction::ClientToServer));
+        assert!(!internet.admits(&v4([9, 9, 9, 9], [10, 77, 0, 3]), Direction::ServerToClient));
+        let ipv6 = v6(
+            "fd42:fed0::2".parse().unwrap(),
+            "2606:4700:4700::1111".parse().unwrap(),
+        );
+        assert!(!internet.admits(&ipv6, Direction::ClientToServer));
+        let mut fragmented = v4([10, 77, 0, 2], [9, 9, 9, 9]);
+        fragmented[6] = 0x20;
+        assert!(!internet.admits(&fragmented, Direction::ClientToServer));
     }
-
 }
