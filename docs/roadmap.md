@@ -19,7 +19,7 @@
 - [ ] Per-device identity, short-lived enrollment and revocation. *(certificate fingerprint authorization, live revocation, SSH CLI, offline CSR approval, and local passphrase-encrypted PKCS#8 client keys are implemented; OS keystore, secure CA-key handling and automatic enrollment remain pending)*
 - [ ] Multiplexed TCP streams; explicit UDP semantics. *(one bounded TCP stream per TLS session implemented)*
 - [x] Linux command-line test client and isolated integration test (fixed target, not a full VPN).
-- [ ] Packet capture and network behavior measurement against baselines. *(Synthetic TLS ClientHello and TCP profile measurement exists; representative browser baselines and classification validation pending.)*
+- [ ] Packet capture and network behavior measurement against baselines. *(Synthetic TLS ClientHello and TCP profile measurement is now passing in CI; first report shows no ALPN and a markedly different handshake from curl/OpenSSL HTTP/1.1; representative browser and matched-workload classification validation pending.)*
 
 **Exit:** one authorized client can securely exchange synthetic traffic through a controlled server; tests prove auth, limits and errors. **Not yet an installable consumer VPN.**
 

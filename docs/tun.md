@@ -31,3 +31,19 @@ The network observer can still see the destination IP, handshake metadata and tr
 - Do not publish real user captures, server addresses or private keys.
 
 References: Linux TUN https://docs.kernel.org/networking/tuntap.html ; TLS 1.3 https://www.rfc-editor.org/rfc/rfc8446 .
+
+## First measured lab fingerprint (9 Nov 2026)
+
+The synthetic capture (GitHub Actions run 42563767605) extracted one FedUp and one curl/OpenSSL ClientHello:
+
+| Field | FedUp | HTTP/1.1 control |
+| --- | --- | --- |
+| SNI | localhost | localhost |
+| ALPN | none | http/1.1 |
+| ClientHello size | 223 bytes | 1561 bytes |
+| Advertised cipher suites | 9 | 30 |
+| TCP frames in this specific test | 103 | 20 |
+
+The applications exercised **different workloads**. TCP frame counts, flow duration and timing are therefore not controlled comparisons. The ClientHello and ALPN differences are observable and reproducible; they do NOT prove that any particular censorship system classifies the protocol.
+
+The next experiment must use matched workloads, larger samples, negative tests and a real standards-compliant application protocol rather than false HTTP ALPN labels.
