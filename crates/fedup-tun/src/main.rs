@@ -98,7 +98,9 @@ fn require_isolated_network_namespace() -> Result<()> {
     let current = fs::read_link("/proc/self/ns/net")?;
     let init = fs::read_link("/proc/1/ns/net")?;
     if current == init {
-        return Err("experimental IP TUN may only run inside a separate Linux network namespace".into());
+        return Err(
+            "experimental IP TUN may only run inside a separate Linux network namespace".into(),
+        );
     }
     Ok(())
 }
