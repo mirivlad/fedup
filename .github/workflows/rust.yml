@@ -162,7 +162,7 @@ jobs:
       - name: Install Linux namespace test tools
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iproute2 iputils-ping libssl-dev pkg-config curl tcpdump nftables
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iproute2 iputils-ping libssl-dev pkg-config curl tcpdump nftables nghttp2-client nghttp2-server
       - name: Build experimental TUN, enrollment and administration
         run: cargo build -p fedup-tun -p fedup-identity -p fedup-enroll -p fedup-admin -p fedup-netguard
       - name: Verify isolated namespaces and parse synthetic TLS ClientHello
@@ -184,8 +184,10 @@ jobs:
           import json,sys
           result=json.load(open(sys.argv[1]))
           assert result["fedup"]["client_hello_count"] > 0, "no FedUp ClientHello"
-          assert result["https_reference"]["client_hello_count"] > 0, "no baseline HTTPS ClientHello"
-          print("TLS fingerprint extraction from synthetic FedUp and HTTPS captures: PASS")
+          assert result["https_reference"]["client_hello_count"] > 0, "no HTTPS/1.1 ClientHello"
+          assert result["https2_reference"]["client_hello_count"] > 0, "no HTTPS/2 ClientHello"
+          assert "h2" in result["https2_reference"]["client_hello_visible"][0]["offered_alpn"]
+          print("TLS fingerprints from synthetic FedUp, HTTPS/1.1, real HTTPS/2: PASS")
           PY
       - name: Verify genuine HTTP/2 packet routing and ALPN h2
         run: |

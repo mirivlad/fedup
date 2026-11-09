@@ -167,13 +167,21 @@ fi
 # Set FEDUP_CAPTURE_PCAP to an output path (never capture personal browsing).
 CAPTURE="$(printenv FEDUP_CAPTURE_PCAP 2>/dev/null || true)"
 if [[ -n "$CAPTURE" ]]; then
-  command -v tcpdump >/dev/null || { echo "tcpdump required for capture" >&2; exit 2; }
+  for cmd in tcpdump nghttpd nghttp; do
+    command -v "$cmd" >/dev/null || { echo "$cmd required for captured HTTP/2 baseline" >&2; exit 2; }
+  done
+  mkdir -p "$TMP/site"
+  printf "local synthetic web page, no outside traffic\n" >"$TMP/site/index.html"
   # Launch reference server now, but do not begin capture until AFTER
   # h2 authorization probes, which deliberately establish extra TLS sessions.
   # The controlled traffic study must contain exactly ONE FedUp ClientHello.
   ip netns exec "$SN" openssl s_server -accept 172.31.44.1:9443 \
     -cert "$TMP/server.pem" -key "$TMP/server.key" -tls1_3 -www \
     >"$TMP/https.log" 2>&1 &
+  PIDS="$PIDS $!"
+  # Ordinary public HTTP/2 TLS web server (not openssl s_server -www).
+  ip netns exec "$SN" nghttpd -d "$TMP/site" 9553 \
+    "$TMP/server.key" "$TMP/server.pem" >"$TMP/https2.log" 2>&1 &
   PIDS="$PIDS $!"
 fi
 if ip -n "$CN" route get 1.1.1.1 >/dev/null 2>&1; then
@@ -212,10 +220,10 @@ if [[ "$MODE" == h2 ]]; then
 fi
 
 # Start a clean measurement AFTER deliberate extra probe connections. Also
-# capture the HTTP/1.1 control ClientHello in the SAME final PCAP.
+# capture genuine HTTP/2 and HTTP/1.1 control ClientHellos in the SAME PCAP.
 if [[ -n "$CAPTURE" ]]; then
   ip netns exec "$SN" tcpdump -i "$SV" -n -s 0 -U -w "$CAPTURE" \
-    '(tcp port 7443 or tcp port 9443)' >"$TMP/tcpdump.log" 2>&1 &
+    '(tcp port 7443 or tcp port 9443 or tcp port 9553)' >"$TMP/tcpdump.log" 2>&1 &
   PIDS="$PIDS $!"
   sleep 0.3
   for i in $(seq 1 30); do
@@ -226,6 +234,23 @@ if [[ -n "$CAPTURE" ]]; then
     fi
     sleep 0.2
   done
+  # This connection cannot leave the namespace; --no-verify-peer is ONLY
+  # for the disposable, self-signed test CA, never a production client.
+  HTTP2_READY=0
+  for i in $(seq 1 30); do
+    if timeout 4 ip netns exec "$CN" nghttp --no-verify-peer \
+        https://172.31.44.1:9553/index.html >"$TMP/nghttp.log" 2>&1; then
+      HTTP2_READY=1
+      break
+    fi
+    sleep 0.2
+  done
+  if [[ "$HTTP2_READY" != 1 ]]; then
+    cat "$TMP/https2.log" "$TMP/nghttp.log" >&2
+    echo "FAIL: local real HTTPS/2 reference did not connect" >&2
+    exit 1
+  fi
+  echo "Local real HTTPS/2 control in isolated namespace: PASS"
 fi
 
 printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" "$CLIENT_CMD" \

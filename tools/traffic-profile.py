@@ -251,6 +251,7 @@ def main():
     parser.add_argument("pcap", type=Path)
     parser.add_argument("--fedup-port", type=int, default=7443)
     parser.add_argument("--https-port", type=int, default=9443)
+    parser.add_argument("--https2-port", type=int, default=9553)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     captured = []
@@ -262,18 +263,25 @@ def main():
         "experiment": "synthetic test namespaces; NOT an actual DPI classifier",
         "fedup": report(captured, args.fedup_port),
         "https_reference": report(captured, args.https_port),
+        "https2_reference": report(captured, args.https2_port),
         "warnings": [
             "ClientHello, IP destinations and flow shape can remain observable.",
             "FedUp raw TLS uses custom frames; its separate h2 mode implements real HTTP/2 but is not browser-equivalent.",
-            "Reference is curl/OpenSSL HTTP/1.1, not representative browser traffic.",
+            "HTTP/1.1 control is curl/OpenSSL; HTTP/2 control is nghttp/OpenSSL; neither is a browser.",
+            "HTTP/2 control does not require a TLS client certificate, unlike FedUp.",
             "Lab flow workloads differ; frame counts and durations cannot be directly compared.",
             "Virtual veth captures may show GSO/GRO artifacts, not exact physical wire frame sizes.",
             "A single controlled capture cannot prove censor detection accuracy.",
             "Never publish personal traffic PCAPs, private endpoints or credentials.",
         ],
     }
-    if not result["fedup"]["client_hello_count"] or not result["https_reference"]["client_hello_count"]:
-        raise RuntimeError("missing FedUp or reference ClientHello; capture is incomplete")
+    if (not result["fedup"]["client_hello_count"]
+            or not result["https_reference"]["client_hello_count"]
+            or not result["https2_reference"]["client_hello_count"]):
+        raise RuntimeError("missing FedUp or HTTPS/1.1 or HTTPS/2 ClientHello; incomplete capture")
+    for hello in result["https2_reference"]["client_hello_visible"]:
+        if "h2" not in hello["offered_alpn"]:
+            raise RuntimeError("HTTPS/2 control did not offer ALPN h2")
     output = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     if args.output:
         fd = os.open(str(args.output), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
