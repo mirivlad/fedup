@@ -351,9 +351,9 @@ fn usage() {
       fedup-enroll init <private-state-dir>\n\
       fedup-enroll invite <state-dir> <device> <ttl-seconds> <ca.pem> <server-dns> <invite.json>\n\
       fedup-enroll request <invite.json> <client.csr.pem> <request.json>\n\
-      fedup-enroll approve <state-dir> <ca.pem> <OFFLINE-ca.key> <request.json> <cert.pem>\n\
+      fedup-enroll approve <state-dir> <ca.pem> <OFFLINE-ca.key> <request.json> <cert.pem> --unsafe-lab-plaintext-ca\n\
       fedup-enroll recover <state-dir> <invitation-id> <cert.pem>\n\
-      This program never generates, receives or stores CLIENT private keys."
+      This laboratory command requires an explicit unsafe-plaintext-CA flag. Never use it with a production issuer. It never handles CLIENT private keys."
     );
 }
 fn run() -> Result<()> {
@@ -375,7 +375,8 @@ fn run() -> Result<()> {
         [_, action, inv, csr, out] if action == "request" => {
             request(Path::new(inv), Path::new(csr), Path::new(out))
         }
-        [_, action, dir, ca, key, req, out] if action == "approve" => approve(
+        [_, action, dir, ca, key, req, out, flag]
+            if action == "approve" && flag == "--unsafe-lab-plaintext-ca" => approve(
             Path::new(dir),
             Path::new(ca),
             Path::new(key),
