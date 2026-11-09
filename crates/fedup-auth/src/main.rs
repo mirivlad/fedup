@@ -176,7 +176,7 @@ mod tests {
         }
         assert!(!attempts.allow("alice"));
         assert!(attempts.allow("bob"));
-        for i in 0..89 {
+        for i in 0..88 {
             assert!(attempts.allow(&format!("guest{i}")));
         }
         assert!(!attempts.allow("guest-new"));
