@@ -90,3 +90,16 @@ jobs:
           assert result["https_reference"]["client_hello_count"] > 0, "no baseline HTTPS ClientHello"
           print("TLS fingerprint extraction from synthetic FedUp and HTTPS captures: PASS")
           PY
+      - name: Verify genuine HTTP/2 packet routing and ALPN h2
+        run: |
+          sudo env FEDUP_TUN_TRANSPORT=h2 FEDUP_CAPTURE_PCAP="$RUNNER_TEMP/fedup-profile/tun-h2.pcap" bash tests/tun-smoke.sh
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/fedup-profile/tun-h2.pcap"
+          python3 tools/traffic-profile.py "$RUNNER_TEMP/fedup-profile/tun-h2.pcap" --output "$RUNNER_TEMP/fedup-profile/h2-report.json"
+          python3 - "$RUNNER_TEMP/fedup-profile/report.json" "$RUNNER_TEMP/fedup-profile/h2-report.json" <<'PY'
+          import json,sys
+          raw=json.load(open(sys.argv[1]))["fedup"]["client_hello_visible"][0]
+          h2=json.load(open(sys.argv[2]))["fedup"]["client_hello_visible"][0]
+          assert raw["offered_alpn"] == [], "raw carrier unexpectedly advertises ALPN"
+          assert h2["offered_alpn"] == ["h2"], f"genuine HTTP/2 carrier did not offer h2: {h2}"
+          print("Real HTTP/2 IP tunnel carried IPv4/IPv6 TCP/UDP/DNS and negotiated ALPN h2: PASS")
+          PY
