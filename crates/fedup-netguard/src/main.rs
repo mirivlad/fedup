@@ -136,7 +136,16 @@ fn load(path: &Path) -> Result<Policy> {
 }
 
 fn run_nft(args: &[&str], script: Option<&str>) -> Result<std::process::Output> {
-    let mut command = Command::new("nft");
+    // Never resolve a privileged executable through an untrusted PATH.
+    // Debian/MX Linux install nftables under /usr/sbin (or legacy /sbin).
+    let binary = if Path::new("/usr/sbin/nft").is_file() {
+        "/usr/sbin/nft"
+    } else if Path::new("/sbin/nft").is_file() {
+        "/sbin/nft"
+    } else {
+        return Err("nft not installed at /usr/sbin/nft or /sbin/nft".into());
+    };
+    let mut command = Command::new(binary);
     command.args(args).stdin(if script.is_some() {
         Stdio::piped()
     } else {
