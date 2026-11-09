@@ -407,6 +407,7 @@ async fn h2_client_session(
     tls: tokio_rustls::client::TlsStream<TcpStream>,
     hostname: &str,
     tun_name: &str,
+    internet_v4: bool,
 ) -> Result<()> {
     if tls.get_ref().1.alpn_protocol() != Some(b"h2".as_slice()) {
         return Err("ALPN h2 not negotiated".into());
@@ -434,7 +435,7 @@ async fn h2_client_session(
     // Only create TUN after TLS verification and HTTP/2 authorization.
     let tun = create_tun(tun_name)?;
     println!("FedUp genuine HTTP/2 IP tunnel authenticated; no host routing was changed");
-    let result = forward(tun_end, tun, true, None, false).await;
+    let result = forward(tun_end, tun, true, None, internet_v4).await;
     bridge.abort();
     driver.abort();
     result
@@ -563,6 +564,7 @@ async fn client(
     password_stdin: bool,
     http2: bool,
     auth_only: bool,
+    internet_v4: bool,
 ) -> Result<()> {
     require_isolated_network_namespace()?;
     if !private_lab_ip(server) {
@@ -590,7 +592,7 @@ async fn client(
         return h2_auth_probe(tls, &hostname).await;
     }
     if http2 {
-        return h2_client_session(tls, &hostname, name).await;
+        return h2_client_session(tls, &hostname, name, internet_v4).await;
     }
     open(&mut tls).await?;
     expect_open(read_frame(&mut tls).await?)?;
@@ -611,6 +613,7 @@ fedup-tun server-h2-accounts <private-listen-ip:port> <tun-name> <ca.pem> <serve
 fedup-tun server-vps-v4 <listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <users-dir> --unsafe-experimental-public-egress
 fedup-tun client-h2 <private-server-ip:port> <tun-name> <enrolled-device-dir> [--passphrase-stdin]
 fedup-tun probe-h2 <private-server-ip:port> <enrolled-device-dir> [--passphrase-stdin]
+fedup-tun client-vps-v4 <private-test-server-ip:port> <tun-name> <device-dir> [--passphrase-stdin]
 
 Fixed peers: 10.77.0.2 <-> 10.77.0.1 or 10.88.0.10, and
 fd42:fed0::2 <-> fd42:fed0::1 or fd42:fed1::10.
@@ -670,6 +673,14 @@ async fn main() {
                 )
                 .await
             }
+            [_, cmd, addr, tun, device] if cmd == "client-vps-v4" => {
+                client(addr.parse()?, tun, Path::new(device), false, true, false, true).await
+            }
+            [_, cmd, addr, tun, device, flag]
+                if cmd == "client-vps-v4" && flag == "--passphrase-stdin" =>
+            {
+                client(addr.parse()?, tun, Path::new(device), true, true, false, true).await
+            }
             [_, cmd, addr, tun, device] if cmd == "client" || cmd == "client-h2" => {
                 client(
                     addr.parse()?,
@@ -677,6 +688,7 @@ async fn main() {
                     Path::new(device),
                     false,
                     cmd == "client-h2",
+                    false,
                     false,
                 )
                 .await
@@ -691,14 +703,15 @@ async fn main() {
                     true,
                     cmd == "client-h2",
                     false,
+                    false,
                 )
                 .await
             }
             [_, cmd, addr, device] if cmd == "probe-h2" => {
-                client(addr.parse()?, "", Path::new(device), false, true, true).await
+                client(addr.parse()?, "", Path::new(device), false, true, true, false).await
             }
             [_, cmd, addr, device, flag] if cmd == "probe-h2" && flag == "--passphrase-stdin" => {
-                client(addr.parse()?, "", Path::new(device), true, true, true).await
+                client(addr.parse()?, "", Path::new(device), true, true, true, false).await
             }
             _ => {
                 usage();
