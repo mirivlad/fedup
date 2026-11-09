@@ -18,6 +18,7 @@ AUTH_MODE="${FEDUP_VPS_AUTH_MODE:-mtls}"
 case "$AUTH_MODE" in
   mtls) SERVER_CMD=server-vps-v4; CLIENT_CMD=client-vps-v4; PROBE_CMD="" ;;
   proof) SERVER_CMD=server-vps-proof-v4; CLIENT_CMD=client-vps-proof-v4; PROBE_CMD=probe-vps-proof ;;
+  edge) SERVER_CMD=server-vps-proof-h2c; CLIENT_CMD=client-vps-proof-v4; PROBE_CMD=probe-vps-proof ;;
   *) echo "unknown FEDUP_VPS_AUTH_MODE: $AUTH_MODE" >&2; exit 2 ;;
 esac
 USERS="$ROOT/target/debug/fedup-users"
@@ -134,11 +135,38 @@ while True:
     s.sendto(b"fedup-test-dns-reply:"+payload+b"|seen-source="+peer[0].encode(),peer)
 ' >"$TMP/udp.log" 2>&1 &
 PIDS="$PIDS $!"
-ip netns exec "$SN" "$TUN" "$SERVER_CMD" 172.31.44.1:7443 \
-  futserver "$TMP/ca.pem" "$TMP/server.pem" "$TMP/server.key" \
-  "$TMP/users" --unsafe-experimental-public-egress \
-  >"$TMP/server.log" 2>&1 &
-PIDS="$PIDS $!"
+if [[ "$AUTH_MODE" == edge ]]; then
+  command -v caddy >/dev/null || { echo "caddy required for edge acceptance" >&2; exit 2; }
+  # Caddy holds the only public HTTPS listener. Device identity is verified
+  # by the loopback-only h2c backend, not by untrusted HTTP headers.
+  ip netns exec "$SN" "$TUN" server-vps-proof-h2c 127.0.0.1:47678 \
+    futserver "$TMP/ca.pem" "$TMP/users" --behind-trusted-https-proxy \
+    >"$TMP/server.log" 2>&1 &
+  PIDS="$PIDS $!"
+  cat >"$TMP/Caddyfile" <<EOF
+{
+    auto_https off
+    admin off
+}
+https://localhost:7443 {
+    bind 172.31.44.1
+    tls $TMP/server.pem $TMP/server.key
+    reverse_proxy h2c://127.0.0.1:47678 {
+        flush_interval -1
+    }
+}
+EOF
+  caddy validate --config "$TMP/Caddyfile" --adapter caddyfile >/dev/null
+  ip netns exec "$SN" caddy run --config "$TMP/Caddyfile" --adapter caddyfile \
+    >"$TMP/caddy.log" 2>&1 &
+  PIDS="$PIDS $!"
+else
+  ip netns exec "$SN" "$TUN" "$SERVER_CMD" 172.31.44.1:7443 \
+    futserver "$TMP/ca.pem" "$TMP/server.pem" "$TMP/server.key" \
+    "$TMP/users" --unsafe-experimental-public-egress \
+    >"$TMP/server.log" 2>&1 &
+  PIDS="$PIDS $!"
+fi
 for _ in $(seq 1 80); do
   if ip -n "$SN" link show futserver >/dev/null 2>&1; then break; fi
   sleep 0.1
@@ -211,7 +239,7 @@ for proto in --http1.1 --http2; do
   }
 done
 echo "Anonymous HEAD HTTP/1.1 and HTTP/2 status 200: PASS"
-if [[ "$AUTH_MODE" == proof ]]; then
+if [[ "$AUTH_MODE" == proof || "$AUTH_MODE" == edge ]]; then
   # An active TLS client must NOT be asked for a certificate at handshake.
   # OpenSSL can decrypt its own post-ServerHello handshake for inspection;
   # passive observers cannot read these TLS 1.3 handshake contents.
