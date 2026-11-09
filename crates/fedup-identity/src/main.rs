@@ -34,7 +34,11 @@ fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
         [_, action, directory, certificate] if action == "import" => {
             let password = read_password(false, stdin_mode)?;
-            import_certificate(Path::new(directory), Path::new(certificate), password.as_bytes())?;
+            import_certificate(
+                Path::new(directory),
+                Path::new(certificate),
+                password.as_bytes(),
+            )?;
             println!("Certificate validated against pinned CA and local key; import complete");
         }
         _ => {
