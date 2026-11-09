@@ -14,11 +14,11 @@ import java.io.FileOutputStream
 import java.io.IOException
 
 /**
- * Narrowly scoped Android TUN ↔ genuine HTTP/2 experiment.
+ * Experimental Android TUN ↔ genuine HTTP/2 experiment.
  *
- * NOT a full VPN: only 10.77.0.1, 10.88.0.10, fd42:fed0::1,
- * and fd42:fed1::10 enter TUN. DNS and ordinary Internet remain outside.
- * This is for a private lab, never for privacy/security-sensitive browsing.
+ * Two explicit modes: narrow LAB fixed addresses or VPS IPv4 default-route
+ * with in-tunnel DNS and intentionally rejected IPv6. Neither mode is
+ * production-safe or suitable for privacy-critical browsing.
  */
 internal class LabTunnelSession(
     private val service: VpnService,

@@ -26,14 +26,14 @@ import javax.net.ssl.X509ExtendedKeyManager
 import javax.net.ssl.X509TrustManager
 
 /**
- * Diagnostic-only real HTTPS/2 and mutual TLS authorization check.
+ * HTTPS/2 and mutual TLS device authorization helper.
  *
  * Uses the phone's AndroidKeyStore EC private key without exporting it.
  * The server exposes GET /fedup-lab/v1/auth-check only AFTER matching the
  * client cert fingerprint against its allowlist. No TUN or VPN route exists.
  *
- * NEVER call this as a substitute for an actual protected VPN socket:
- * routing and VpnService.protect() are not implemented in this lab probe.
+ * A diagnostic check does not start TUN. In live mode a VpnService and
+ * protected socket factory are REQUIRED before an IP default route is set.
  */
 internal object TlsProbe {
     data class Endpoint(val hostname: String, val port: Int) {

@@ -9,9 +9,9 @@ import android.net.VpnService
 import android.os.Build
 
 /**
- * Temporary narrow lab-only TUN service.
+ * Experimental Android VPN service: narrow LAB and opt-in VPS IPv4 modes.
  *
- * The notification explicitly states that this does NOT protect the Internet.
+ * The notification distinguishes the LAB-only and VPS IPv4 preview modes.
  * The operator must enroll the phone and opt in to replacing the existing
  * Android VPN. Always-on / Lockdown remain disabled in AndroidManifest.xml.
  */
