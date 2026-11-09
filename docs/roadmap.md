@@ -15,10 +15,10 @@
 ## Milestone M1: minimal authenticated Linux-to-Linux transport
 
 - [x] Rust workspace and `fedup-protocol` parser with strict frame-size limits and fuzz target.
-- [ ] TLS-backed entry service with server certificate validation.
-- [ ] Per-device identity, short-lived enrollment and revocation.
-- [ ] Multiplexed TCP streams; explicit UDP semantics.
-- [ ] Linux command-line test client and isolated integration test.
+- [x] Experimental TLS-backed fixed-destination TCP link with server certificate validation and mTLS.
+- [ ] Per-device identity, short-lived enrollment and revocation. *(certificate fingerprint authorization and live revocation exist; invitation enrollment is pending)*
+- [ ] Multiplexed TCP streams; explicit UDP semantics. *(one bounded TCP stream per TLS session implemented)*
+- [x] Linux command-line test client and isolated integration test (fixed target, not a full VPN).
 - [ ] Packet capture and network behavior measurement against baselines.
 
 **Exit:** one authorized client can securely exchange synthetic traffic through a controlled server; tests prove auth, limits and errors. **Not yet an installable consumer VPN.**

@@ -2,7 +2,7 @@
 
 **FedUp** is an early-stage, open-source project for a self-hosted, cross-platform private network tunnel for personal and family use.
 
-> Status: **early research with a running loopback-only laboratory**. The Rust framing codec and experimental mTLS Ping/Pong are NOT a VPN or a deployable network service. Do not rely on this project for anonymity or security-critical connectivity.
+> Status: **early research with two experimental programs**. The Rust framing codec, one-shot mTLS lab and fixed-destination TCP forwarder are NOT a VPN or production-ready network service. Do not rely on this project for anonymity or security-critical connectivity.
 
 ## Goals
 
@@ -35,17 +35,18 @@
 
 ## Experimental laboratory
 
-The first implementation consists of a dependency-free Rust framing codec and a one-shot **loopback-only** mTLS 1.3 Ping/Pong laboratory. It is deliberately not a VPN, proxy, HTTP/2 transport or Internet-facing server.
+The current implementation consists of a dependency-free Rust framing codec, a one-shot **loopback-only** mTLS 1.3 Ping/Pong lab, and an experimental **single-destination TCP forwarder**. The forwarder requires mutually authenticated TLS, an explicit device certificate allowlist and a fixed operator-configured target. It is not a full VPN, web protocol, or production-ready Internet-facing server.
 
 On Linux with the Rust toolchain, OpenSSL and Python 3:
 
 ```sh
 cargo test --workspace --all-targets
-cargo build -p fedup-lab
+cargo build -p fedup-lab -p fedup-link
 bash tests/lab-smoke.sh
+bash tests/link-smoke.sh
 ```
 
-For parser fuzzing, install cargo-fuzz and run `cargo fuzz run frame_parser` from the `fuzz/` directory. See [lab instructions (Russian)](docs/ru/lab.md) and [experimental wire framing](docs/protocol-v1.md).
+For parser fuzzing, install cargo-fuzz and run `cargo fuzz run frame_parser` from the `fuzz/` directory. See [lab instructions (Russian)](docs/ru/lab.md), [TCP link instructions (Russian)](docs/ru/tcp-link.md), [link design & limitations](docs/tcp-link.md) and [experimental wire framing](docs/protocol-v1.md).
 
 ## Read the design
 
