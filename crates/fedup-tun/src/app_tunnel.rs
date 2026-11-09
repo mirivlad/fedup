@@ -12,8 +12,7 @@ fn send_public_page(
     mut respond: h2::server::SendResponse<Bytes>,
     state: &proof::DeviceProof,
 ) -> Result<()> {
-    let (status, content_type, body) =
-        public_page(request.method().as_str(), request.uri().path());
+    let (status, content_type, body) = public_page(request.method().as_str(), request.uri().path());
     let mut response = Response::builder()
         .status(status)
         .header(CONTENT_TYPE, content_type)
