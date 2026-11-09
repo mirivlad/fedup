@@ -306,6 +306,22 @@ async fn h2_server_session(
     let (request, mut respond) = timeout(IO_TIMEOUT, connection.accept())
         .await?
         .ok_or("HTTP/2 client did not open tunnel request")??;
+    // A real HTTP/2 request allowed only AFTER mTLS chain verification
+    // and the server's per-device certificate fingerprint authorization.
+    // This path never creates a new TUN or forwards any packet. Android
+    // can validate its full offline enrollment chain without routing traffic.
+    if request.method() == http::Method::GET
+        && request.uri().path() == "/fedup-lab/v1/auth-check"
+    {
+        respond.send_response(
+            Response::builder()
+                .status(StatusCode::NO_CONTENT)
+                .header(http::header::CACHE_CONTROL, "no-store")
+                .body(())?,
+            true,
+        )?;
+        return Ok(());
+    }
     if !is_h2_request(&request) {
         respond.send_response(
             Response::builder().status(StatusCode::NOT_FOUND).body(())?,
