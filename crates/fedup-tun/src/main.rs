@@ -3,7 +3,11 @@
 //! This version forwards only packets between the fixed client and server,
 //! or a single synthetic egress host, inside operator-controlled network namespaces.
 
+use bytes::Bytes;
 use fedup_identity::{decrypt_pkcs8, device_connection, read_password};
+use h2::{client as h2_client, server as h2_server, RecvStream, SendStream};
+use http::{Request, Response, StatusCode};
+use std::future::poll_fn;
 use fedup_protocol::{encode_header, parse_header, Frame, FrameKind, HEADER_LEN};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
@@ -16,7 +20,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{duplex, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{interval, timeout};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
@@ -332,11 +336,157 @@ where
     }
 }
 
+const H2_URI: &str = "/fedup-lab/v1/ip-tunnel";
+const H2_TYPE: &str = "application/vnd.fedup.ip-packets";
+const H2_CHUNK: usize = 8192;
+
+/// Stream adapter with bounded HTTP/2 flow control. DATA frames may split or
+/// combine FedUp framing; the duplex stream reconstitutes the byte stream.
+/// This is genuine HTTP/2 framing, not a forged ALPN value.
+async fn send_h2(send: &mut SendStream<Bytes>, mut buffer: Bytes) -> Result<()> {
+    while !buffer.is_empty() {
+        let requested = buffer.len().min(H2_CHUNK);
+        send.reserve_capacity(requested);
+        let available = timeout(FRAME_TIMEOUT, poll_fn(|cx| send.poll_capacity(cx)))
+            .await?
+            .ok_or("HTTP/2 stream closed before send capacity became available")??;
+        if available == 0 {
+            return Err("HTTP/2 send window unavailable".into());
+        }
+        send.send_data(buffer.split_to(available.min(requested)), false)?;
+    }
+    Ok(())
+}
+
+async fn h2_bridge(
+    mut receive: RecvStream,
+    mut send: SendStream<Bytes>,
+    socket: DuplexStream,
+) -> Result<()> {
+    let (mut read_pipe, mut write_pipe) = tokio::io::split(socket);
+    let outbound = async {
+        let mut buf = [0u8; H2_CHUNK];
+        loop {
+            let n = read_pipe.read(&mut buf).await?;
+            if n == 0 {
+                send.send_data(Bytes::new(), true)?;
+                return Ok::<(), Box<dyn Error + Send + Sync>>(());
+            }
+            send_h2(&mut send, Bytes::copy_from_slice(&buf[..n])).await?;
+        }
+    };
+    let inbound = async {
+        while let Some(frame) = timeout(FRAME_TIMEOUT, receive.data()).await? {
+            let bytes = frame?;
+            write_pipe.write_all(&bytes).await?;
+            receive.flow_control().release_capacity(bytes.len())?;
+        }
+        write_pipe.shutdown().await?;
+        Ok::<(), Box<dyn Error + Send + Sync>>(())
+    };
+    tokio::try_join!(inbound, outbound)?;
+    Ok(())
+}
+
+fn is_h2_request(request: &Request<RecvStream>) -> bool {
+    request.method() == http::Method::POST
+        && request.uri().path() == H2_URI
+        && request
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .is_some_and(|value| value == H2_TYPE)
+}
+
+async fn h2_server_session(
+    tls: tokio_rustls::server::TlsStream<TcpStream>,
+    tun: Arc<Tun>,
+    revocation: (PathBuf, String),
+) -> Result<()> {
+    if tls.get_ref().1.alpn_protocol() != Some(b"h2".as_slice()) {
+        return Err("ALPN h2 required for HTTP/2 TUN".into());
+    }
+    let mut connection = timeout(IO_TIMEOUT, h2_server::handshake(tls)).await??;
+    let (request, mut respond) = timeout(IO_TIMEOUT, connection.accept())
+        .await?
+        .ok_or("HTTP/2 client did not open tunnel request")??;
+    if !is_h2_request(&request) {
+        respond.send_response(
+            Response::builder().status(StatusCode::NOT_FOUND).body(())?,
+            true,
+        )?;
+        return Err("HTTP/2 request was not the authorized fixed IP tunnel".into());
+    }
+    let outgoing = respond.send_response(
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(http::header::CONTENT_TYPE, H2_TYPE)
+            .body(())?,
+        false,
+    )?;
+
+    let (tun_end, bridge_end) = duplex(64 * 1024);
+    let bridge = tokio::spawn(h2_bridge(request.into_body(), outgoing, bridge_end));
+    // Drive the HTTP/2 connection state machine for the lifetime of its
+    // active stream. Refuse any additional stream on this one-client lab.
+    let driver = tokio::spawn(async move {
+        while let Some(next) = connection.accept().await {
+            let (_, mut respond) = next?;
+            respond.send_response(
+                Response::builder().status(StatusCode::TOO_MANY_REQUESTS).body(())?,
+                true,
+            )?;
+        }
+        Ok::<(), Box<dyn Error + Send + Sync>>(())
+    });
+    let result = forward(tun_end, tun, false, Some(revocation)).await;
+    driver.abort();
+    bridge.abort();
+    result
+}
+
+async fn h2_client_session(
+    tls: tokio_rustls::client::TlsStream<TcpStream>,
+    hostname: &str,
+    tun_name: &str,
+) -> Result<()> {
+    if tls.get_ref().1.alpn_protocol() != Some(b"h2".as_slice()) {
+        return Err("ALPN h2 not negotiated".into());
+    }
+    let (mut sender, connection) = timeout(IO_TIMEOUT, h2_client::handshake(tls)).await??;
+    let driver = tokio::spawn(connection);
+    sender = timeout(IO_TIMEOUT, sender.ready()).await??;
+    let request = Request::builder()
+        .method(http::Method::POST)
+        .uri(format!("https://{hostname}{H2_URI}"))
+        .header(http::header::CONTENT_TYPE, H2_TYPE)
+        .body(())?;
+    let (reply, outgoing) = sender.send_request(request, false)?;
+    let response = timeout(IO_TIMEOUT, reply).await??;
+    if response.status() != StatusCode::OK
+        || response
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .is_none_or(|h| h != H2_TYPE)
+    {
+        return Err("HTTP/2 tunnel request rejected by server".into());
+    }
+    let (tun_end, bridge_end) = duplex(64 * 1024);
+    let bridge = tokio::spawn(h2_bridge(response.into_body(), outgoing, bridge_end));
+    // Only create TUN after TLS verification and HTTP/2 authorization.
+    let tun = create_tun(tun_name)?;
+    println!("FedUp genuine HTTP/2 IP tunnel authenticated; no host routing was changed");
+    let result = forward(tun_end, tun, true, None).await;
+    bridge.abort();
+    driver.abort();
+    result
+}
+
 async fn server_session(
     socket: TcpStream,
     acceptor: TlsAcceptor,
     tun: Arc<Tun>,
     allowlist: &Path,
+    http2: bool,
 ) -> Result<()> {
     let mut tls = timeout(IO_TIMEOUT, acceptor.accept(socket)).await??;
     let peer = tls
@@ -348,6 +498,9 @@ async fn server_session(
     let fp = fingerprint(peer.as_ref());
     if !authorized(allowlist, &fp)? {
         return Err("device not authorized".into());
+    }
+    if http2 {
+        return h2_server_session(tls, tun, (allowlist.to_path_buf(), fp)).await;
     }
     let req = read_frame(&mut tls).await?;
     expect_open(req)?;
@@ -362,6 +515,7 @@ async fn server(
     certificate: &Path,
     key: &Path,
     allowlist: &Path,
+    http2: bool,
 ) -> Result<()> {
     require_isolated_network_namespace()?;
     if !private_lab_ip(listen) {
@@ -371,18 +525,21 @@ async fn server(
         return Err("IPv6 outer transport not configured in this lab".into());
     }
     let _ = authorized(allowlist, "")?;
-    let config = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+    let mut config = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
         .with_client_cert_verifier(
             rustls::server::WebPkiClientVerifier::builder(Arc::new(roots(ca)?)).build()?,
         )
         .with_single_cert(ca_certs(certificate)?, load_key(key)?)?;
+    if http2 {
+        config.alpn_protocols = vec![b"h2".to_vec()];
+    }
     let acceptor = TlsAcceptor::from(Arc::new(config));
     let tun = create_tun(name)?;
     let listener = TcpListener::bind(listen).await?;
     println!("FedUp IP lab server listening on {listen}; one device at a time");
     loop {
         let (socket, _) = listener.accept().await?;
-        if let Err(error) = server_session(socket, acceptor.clone(), tun.clone(), allowlist).await {
+        if let Err(error) = server_session(socket, acceptor.clone(), tun.clone(), allowlist, http2).await {
             eprintln!("IP session closed: {error}");
         }
     }
@@ -393,6 +550,7 @@ async fn client(
     name: &str,
     directory: &Path,
     password_stdin: bool,
+    http2: bool,
 ) -> Result<()> {
     require_isolated_network_namespace()?;
     if !private_lab_ip(server) {
@@ -402,13 +560,20 @@ async fn client(
     let passphrase = read_password(false, password_stdin)?;
     let decoded = decrypt_pkcs8(&device.encrypted_key_path, passphrase.as_bytes())?;
     let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(decoded.to_vec()));
-    let config = ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+    let mut config = ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
         .with_root_certificates(roots(&device.ca_path)?)
         .with_client_auth_cert(ca_certs(&device.cert_path)?, key)?;
+    if http2 {
+        config.alpn_protocols = vec![b"h2".to_vec()];
+    }
     let connector = TlsConnector::from(Arc::new(config));
     let socket = timeout(IO_TIMEOUT, TcpStream::connect(server)).await??;
-    let server_name: ServerName<'static> = ServerName::try_from(device.server_name)?;
+    let hostname = device.server_name;
+    let server_name: ServerName<'static> = ServerName::try_from(hostname.clone())?;
     let mut tls = timeout(IO_TIMEOUT, connector.connect(server_name, socket)).await??;
+    if http2 {
+        return h2_client_session(tls, &hostname, name).await;
+    }
     open(&mut tls).await?;
     expect_open(read_frame(&mut tls).await?)?;
     // TUN only after successful authentication; a network outage cannot
@@ -420,9 +585,11 @@ async fn client(
 
 fn usage() {
     eprintln!(
-        r#"FedUp IP lab — NOT a production VPN and NOT HTTPS:
+        r#"FedUp IP lab — NOT a production VPN. Experimental genuine HTTPS/2 mode:
 fedup-tun server <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <allowlist.txt>
 fedup-tun client <private-server-ip:port> <tun-name> <enrolled-device-dir> [--passphrase-stdin]
+fedup-tun server-h2 <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <allowlist.txt>
+fedup-tun client-h2 <private-server-ip:port> <tun-name> <enrolled-device-dir> [--passphrase-stdin]
 
 Fixed peers: 10.77.0.2 <-> 10.77.0.1 or 10.88.0.10, and
 fd42:fed0::2 <-> fd42:fed0::1 or fd42:fed1::10.
@@ -437,7 +604,9 @@ async fn main() {
     let args: Vec<String> = env::args().collect();
     let result: Result<()> = async {
         match args.as_slice() {
-            [_, cmd, bind, tun, ca, cert, key, allow] if cmd == "server" => {
+            [_, cmd, bind, tun, ca, cert, key, allow]
+                if cmd == "server" || cmd == "server-h2" =>
+            {
                 server(
                     bind.parse()?,
                     tun,
@@ -445,16 +614,20 @@ async fn main() {
                     Path::new(cert),
                     Path::new(key),
                     Path::new(allow),
+                    cmd == "server-h2",
                 )
                 .await
             }
-            [_, cmd, addr, tun, device] if cmd == "client" => {
-                client(addr.parse()?, tun, Path::new(device), false).await
+            [_, cmd, addr, tun, device]
+                if cmd == "client" || cmd == "client-h2" =>
+            {
+                client(addr.parse()?, tun, Path::new(device), false, cmd == "client-h2").await
             }
             [_, cmd, addr, tun, device, flag]
-                if cmd == "client" && flag == "--passphrase-stdin" =>
+                if (cmd == "client" || cmd == "client-h2")
+                    && flag == "--passphrase-stdin" =>
             {
-                client(addr.parse()?, tun, Path::new(device), true).await
+                client(addr.parse()?, tun, Path::new(device), true, cmd == "client-h2").await
             }
             _ => {
                 usage();
