@@ -4,8 +4,8 @@
 
 use rand::{rngs::OsRng, RngCore};
 use rcgen::{
-    CertificateParams, CertificateSigningRequestParams, DnType, ExtendedKeyUsagePurpose,
-    IsCa, Issuer, KeyPair, KeyUsagePurpose, SerialNumber,
+    CertificateParams, CertificateSigningRequestParams, DnType, ExtendedKeyUsagePurpose, IsCa,
+    Issuer, KeyPair, KeyUsagePurpose, SerialNumber,
 };
 use rustls_pemfile::certs;
 use serde::Serialize;
@@ -38,8 +38,7 @@ pub struct IssuedDevice {
 }
 
 fn one_certificate(pem: &str) -> Result<Vec<u8>> {
-    let all = certs(&mut BufReader::new(pem.as_bytes()))
-        .collect::<std::io::Result<Vec<_>>>()?;
+    let all = certs(&mut BufReader::new(pem.as_bytes())).collect::<std::io::Result<Vec<_>>>()?;
     if all.len() != 1 {
         return Err("issuer must have exactly one CA certificate".into());
     }
@@ -95,10 +94,7 @@ impl LabIssuer {
         // rcgen verifies the CSR's proof of possession. Never copy untrusted
         // CSR subject names or requested extensions into the signed cert.
         let csr = CertificateSigningRequestParams::from_pem(csr_pem)?;
-        let issuer = Issuer::from_ca_cert_pem(
-            &self.ca_pem,
-            KeyPair::from_pem(&self.ca_key)?,
-        )?;
+        let issuer = Issuer::from_ca_cert_pem(&self.ca_pem, KeyPair::from_pem(&self.ca_key)?)?;
         let now = OffsetDateTime::now_utc();
         let mut params = CertificateParams::new(Vec::<String>::new())?;
         params
