@@ -61,6 +61,17 @@ printf '%s\n%s\n' "$PASS" "$PASS" | "$DEVICE" request \
 printf '%s\n' "$PASS" | "$DEVICE" import "$TMP/identity" "$TMP/issued.pem" --passphrase-stdin
 "$ADMIN" init "$TMP/allowed.txt"
 "$ADMIN" add "$TMP/allowed.txt" lab-device "$TMP/identity/client.pem"
+# The same offline enrollment may issue a valid CA-signed but UNAUTHORIZED
+# device certificate. Server allowlist, not just CA verification, must decide.
+if [[ "$MODE" == h2 ]]; then
+  "$ENROLL" invite "$TMP/issuer" denied-device 300 "$TMP/ca.pem" localhost "$TMP/denied-invite.json"
+  printf '%s\n%s\n' "$PASS" "$PASS" | "$DEVICE" request \
+    "$TMP/denied-invite.json" "$TMP/denied-identity" "$TMP/denied-request.json" --passphrase-stdin
+  "$ENROLL" approve "$TMP/issuer" "$TMP/ca.pem" "$TMP/ca.key" \
+    "$TMP/denied-request.json" "$TMP/denied-cert.pem" --unsafe-lab-plaintext-ca
+  printf '%s\n' "$PASS" | "$DEVICE" import \
+    "$TMP/denied-identity" "$TMP/denied-cert.pem" --passphrase-stdin
+fi
 
 ip netns add "$CN"; ip netns add "$SN"; ip netns add "$EN"
 ip link add "$CV" type veth peer name "$SV"
@@ -193,6 +204,23 @@ if ! ip -n "$SN" link show futserver >/dev/null 2>&1; then
 fi
 ip -n "$SN" addr add 10.77.0.1/30 dev futserver
 ip -n "$SN" -6 addr add fd42:fed0::1/64 dev futserver
+
+if [[ "$MODE" == h2 ]]; then
+  # A correct device gets HTTP/2 204 only after mTLS + fingerprint approval.
+  if ! printf '%s\n' "$PASS" | timeout 20 ip netns exec "$CN" "$TUN" probe-h2 \
+      172.31.44.1:7443 "$TMP/identity" --passphrase-stdin; then
+    echo "FAIL: authorized mTLS device HTTP/2 probe was refused" >&2
+    cat "$TMP/server.log" >&2
+    exit 1
+  fi
+  # Valid CA-signed certificate not present in the server's explicit allowlist.
+  if printf '%s\n' "$PASS" | timeout 20 ip netns exec "$CN" "$TUN" probe-h2 \
+      172.31.44.1:7443 "$TMP/denied-identity" --passphrase-stdin >"$TMP/denied.log" 2>&1; then
+    echo "FAIL: unknown CA-signed device passed HTTP/2 authorization check" >&2
+    exit 1
+  fi
+  echo "HTTP/2 probe: approved device PASS, unknown device DENIED; no TUN created"
+fi
 
 printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" "$CLIENT_CMD" \
   172.31.44.1:7443 futclient "$TMP/identity" --passphrase-stdin \
