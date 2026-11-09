@@ -51,6 +51,8 @@ jobs:
         run: cargo build -p fedup-users -p fedup-auth
       - name: Test user add, password rotation, revocation and private loopback API
         run: bash tests/users-smoke.sh
+      - name: Verify full password-to-CSR-to-short-lived-certificate chain (disposable CA only)
+        run: bash tests/users-enroll-smoke.sh
 
   h2-laboratory:
     runs-on: ubuntu-latest
