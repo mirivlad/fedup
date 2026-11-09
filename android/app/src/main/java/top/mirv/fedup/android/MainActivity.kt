@@ -129,11 +129,15 @@ class MainActivity : Activity() {
             Thread {
                 try {
                     AccountLogin.check(host, username, secret)
+                    // Persist only authenticated AES-GCM ciphertext; never
+                    // store the password in normal SharedPreferences.
+                    CredentialsVault(this).save(secret)
                     prefs.edit().putString("server", host)
                         .putString("username", username).apply()
                     runOnUiThread {
-                        message("Пользователь подтверждён сервером. " +
-                            "Автоматическая выдача ключа и VPN-подключение пока не реализованы.")
+                        message("Учётная запись подтверждена сервером. Пароль сохранён " +
+                            "в зашифрованном виде с ключом Android Keystore. " +
+                            "Автоматическая регистрация устройства и VPN-подключение пока не готовы.")
                     }
                 } catch (error: Exception) {
                     runOnUiThread {
