@@ -99,6 +99,14 @@ jobs:
           grep -q 'android.permission.BIND_VPN_SERVICE' android/app/src/main/AndroidManifest.xml
           grep -q 'android.net.VpnService.SUPPORTS_ALWAYS_ON' android/app/src/main/AndroidManifest.xml
           grep -q 'android:value="false"' android/app/src/main/AndroidManifest.xml
+      - name: Save Android LAB debug APK for manual device tests
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fedup-android-lab-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+          if-no-files-found: error
 
   core-portability:
     runs-on: ubuntu-latest
