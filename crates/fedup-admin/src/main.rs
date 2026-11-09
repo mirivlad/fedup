@@ -132,6 +132,7 @@ fn exclusive_lock(path: &Path) -> AdminResult<File> {
     }
     let file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .mode(0o600)
