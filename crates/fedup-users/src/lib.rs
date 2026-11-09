@@ -431,9 +431,11 @@ fn list_devices(dir: &Path, username: &str) -> Result<()> {
         ))
     })?;
     for item in items {
-        let (fingerprint,label,revision,expires,disabled)=item?;
-        println!("{label}\t{fingerprint}\taccount_revision={revision}\texpires={expires}\t{}",
-                 if disabled {"revoked"} else {"issued"});
+        let (fingerprint, label, revision, expires, disabled) = item?;
+        println!(
+            "{label}\t{fingerprint}\taccount_revision={revision}\texpires={expires}\t{}",
+            if disabled { "revoked" } else { "issued" }
+        );
     }
     Ok(())
 }
@@ -500,7 +502,7 @@ pub fn run_cli() -> Result<()> {
             } else {
                 Err("device not authorized".into())
             }
-        },
+        }
         [_, cmd, dir, user, flag] if cmd == "add" && flag == "--password-stdin" => {
             let pass = stdin_password()?;
             add(Path::new(dir), user, &pass)
