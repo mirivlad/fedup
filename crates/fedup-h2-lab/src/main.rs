@@ -238,7 +238,7 @@ async fn run_client(
     }
 
     let (mut sender, connection) = timeout(CONNECT_TIMEOUT, client::handshake(tls)).await??;
-    let driver = tokio::spawn(async move { connection.await });
+    let driver = tokio::spawn(connection);
     sender = timeout(CONNECT_TIMEOUT, sender.ready()).await??;
     let request = Request::builder()
         .method(http::Method::POST)
@@ -354,6 +354,6 @@ mod tests {
         assert_eq!(synthetic_payload(251).len(), 251);
         assert_eq!(synthetic_payload(251)[250], 250);
         assert_eq!(synthetic_payload(252)[251], 0);
-        assert!(MAX_TRANSFER >= 128 * 1024);
+        assert_eq!(synthetic_payload(128 * 1024).len(), 128 * 1024);
     }
 }
