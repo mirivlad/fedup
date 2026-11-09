@@ -1,7 +1,7 @@
 //! FedUp Linux IP-packet lab: one private pair of TUN endpoints over mutual TLS.
 //! Intentionally NOT an Internet VPN, not an HTTPS impersonator, and not production-ready.
-//! This version forwards only packets 10.77.0.2 <-> 10.77.0.1 (and optional IPv6
-//! fd42:fed0::2 <-> fd42:fed0::1) inside an operator-controlled network namespace.
+//! This version forwards only packets between the fixed client and server,
+//! or a single synthetic egress host, inside operator-controlled network namespaces.
 
 use fedup_identity::{decrypt_pkcs8, device_connection, read_password};
 use fedup_protocol::{encode_header, parse_header, Frame, FrameKind, HEADER_LEN};
@@ -134,6 +134,30 @@ fn addresses_v6(dir: Direction) -> (Ipv6Addr, Ipv6Addr) {
     }
 }
 
+/// Experimental, exact-host routing policy. Never accept a range or a user-chosen
+/// destination; the synthetic egress host lives in a third isolated namespace.
+fn routed_addresses(dir: Direction) -> (IpAddr, IpAddr) {
+    match dir {
+        Direction::ClientToServer => (
+            IpAddr::V4(Ipv4Addr::new(10, 77, 0, 2)),
+            IpAddr::V4(Ipv4Addr::new(10, 88, 0, 10)),
+        ),
+        Direction::ServerToClient => (
+            IpAddr::V4(Ipv4Addr::new(10, 88, 0, 10)),
+            IpAddr::V4(Ipv4Addr::new(10, 77, 0, 2)),
+        ),
+    }
+}
+
+fn routed_addresses_v6(dir: Direction) -> (Ipv6Addr, Ipv6Addr) {
+    let client: Ipv6Addr = "fd42:fed0::2".parse().expect("constant client IPv6");
+    let egress: Ipv6Addr = "fd42:fed1::10".parse().expect("constant egress IPv6");
+    match dir {
+        Direction::ClientToServer => (client, egress),
+        Direction::ServerToClient => (egress, client),
+    }
+}
+
 /// Reject untrusted traffic that could inject/escape outside the lab pair.
 /// Validity here means *framing, IP length and peer addresses*, not full
 /// checksums or protocol correctness: kernel verifies those after TUN injection.
@@ -166,7 +190,11 @@ fn valid_ip(packet: &[u8], dir: Direction) -> bool {
                 packet[16], packet[17], packet[18], packet[19],
             ));
             let expected = addresses(dir);
-            src == expected.0 && dst == expected.1
+            (src == expected.0 && dst == expected.1)
+                || {
+                    let routed = routed_addresses(dir);
+                    src == routed.0 && dst == routed.1
+                }
         }
         6 => {
             if packet.len() < 40 {
@@ -179,7 +207,7 @@ fn valid_ip(packet: &[u8], dir: Direction) -> bool {
             let src = Ipv6Addr::from(<[u8; 16]>::try_from(&packet[8..24]).expect("length checked"));
             let dst =
                 Ipv6Addr::from(<[u8; 16]>::try_from(&packet[24..40]).expect("length checked"));
-            (src, dst) == addresses_v6(dir)
+            (src, dst) == addresses_v6(dir) || (src, dst) == routed_addresses_v6(dir)
         }
         _ => false,
     }
@@ -236,8 +264,8 @@ fn create_tun(name: &str) -> Result<Arc<Tun>> {
     Ok(Arc::new(tun))
 }
 
-/// Single VPN session. The TUN is NOT connected to any public egress.
-/// Only a fixed pair of /32 and /128 addresses is allowed.
+/// Single experimental IP tunnel. No public egress.
+/// Only a fixed client/server pair and one synthetic remote host are allowed.
 async fn forward<T>(
     stream: T,
     tun: Arc<Tun>,
@@ -397,8 +425,9 @@ fn usage() {
 fedup-tun server <private-listen-ip:port> <tun-name> <ca.pem> <server.pem> <server.key> <allowlist.txt>
 fedup-tun client <private-server-ip:port> <tun-name> <enrolled-device-dir> [--passphrase-stdin]
 
-Only 10.77.0.2 <-> 10.77.0.1 and fd42:fed0::2 <-> fd42:fed0::1 IP packets
-are accepted. No NAT, Internet egress, DNS, full-tunnel routing or kill switch.
+Fixed peers: 10.77.0.2 <-> 10.77.0.1 or 10.88.0.10, and
+fd42:fed0::2 <-> fd42:fed0::1 or fd42:fed1::10.
+No Internet egress, host DNS modification, full-tunnel routing or kill switch.
 Use only in controlled, separate Linux network namespaces."#
     );
 }
@@ -501,6 +530,36 @@ mod tests {
         packet[4] = 0;
         packet[5] = 7;
         assert!(!valid_ip(&packet, Direction::ClientToServer));
+    }
+
+    #[test]
+    fn routed_egress_exact_host_only_ipv4() {
+        let out = ipv4_packet([10, 77, 0, 2], [10, 88, 0, 10]);
+        assert!(valid_ip(&out, Direction::ClientToServer));
+        assert!(!valid_ip(&out, Direction::ServerToClient));
+        let reply = ipv4_packet([10, 88, 0, 10], [10, 77, 0, 2]);
+        assert!(valid_ip(&reply, Direction::ServerToClient));
+        let forbidden_host = ipv4_packet([10, 77, 0, 2], [10, 88, 0, 11]);
+        assert!(!valid_ip(&forbidden_host, Direction::ClientToServer));
+        let public = ipv4_packet([10, 77, 0, 2], [1, 1, 1, 1]);
+        assert!(!valid_ip(&public, Direction::ClientToServer));
+    }
+
+    #[test]
+    fn routed_egress_exact_host_only_ipv6() {
+        let (src, dst) = routed_addresses_v6(Direction::ClientToServer);
+        assert!(valid_ip(&ipv6_packet(src, dst), Direction::ClientToServer));
+        assert!(!valid_ip(&ipv6_packet(src, dst), Direction::ServerToClient));
+        let (reverse_src, reverse_dst) = routed_addresses_v6(Direction::ServerToClient);
+        assert!(valid_ip(
+            &ipv6_packet(reverse_src, reverse_dst),
+            Direction::ServerToClient
+        ));
+        let unauthorized: Ipv6Addr = "fd42:fed1::11".parse().unwrap();
+        assert!(!valid_ip(
+            &ipv6_packet(src, unauthorized),
+            Direction::ClientToServer
+        ));
     }
 
     #[test]
