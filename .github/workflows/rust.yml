@@ -40,3 +40,20 @@ jobs:
         run: cargo build -p fedup-identity
       - name: Verify encrypted key creation and end-to-end mTLS
         run: bash tests/device-smoke.sh
+
+  tun-namespace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup show
+      - name: Install Linux namespace test tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq iproute2 iputils-ping libssl-dev pkg-config curl
+      - name: Build experimental TUN, enrollment and administration
+        run: cargo build -p fedup-tun -p fedup-identity -p fedup-enroll -p fedup-admin
+      - name: Verify isolated network namespaces and revocation
+        run: sudo bash tests/tun-smoke.sh
