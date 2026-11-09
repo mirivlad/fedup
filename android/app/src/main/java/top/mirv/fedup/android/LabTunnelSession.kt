@@ -25,6 +25,7 @@ internal class LabTunnelSession(
     private val identity: EnrollmentManager,
     private val endpoint: String,
     private val internetV4: Boolean,
+    private val appProof: Boolean,
     private val onReady: () -> Unit
 ) {
     @Volatile private var stopped = false
@@ -46,9 +47,17 @@ internal class LabTunnelSession(
 
         // The upstream socket is protected BEFORE connecting. The server
         // authenticates this client in a separate HTTP/2 204 probe.
-        val (client, baseUrl) = TlsProbe.createClient(identity, endpoint, service, live = true)
+        val (client, baseUrl) = if (appProof) {
+            ApplicationProof.createClient(identity, endpoint, service)
+        } else {
+            TlsProbe.createClient(identity, endpoint, service, live = true)
+        }
         try {
-            TlsProbe.verifyAuthorization(client, baseUrl)
+            if (appProof) {
+                ApplicationProof.verifyAuthorization(identity, client, baseUrl)
+            } else {
+                TlsProbe.verifyAuthorization(client, baseUrl)
+            }
             check(!stopped && android.net.VpnService.prepare(service) == null) {
                 "VPN permission revoked during authentication"
             }
@@ -107,10 +116,14 @@ internal class LabTunnelSession(
                     }
                 }
             }
-            val request = Request.Builder()
-                .url(baseUrl + "/fedup-lab/v1/ip-tunnel")
-                .post(requestBody)
-                .build()
+            val builder = if (appProof) {
+                ApplicationProof.signedRequest(
+                    identity, client, baseUrl, "POST", "/fedup-lab/v1/ip-tunnel"
+                )
+            } else {
+                Request.Builder().url(baseUrl + "/fedup-lab/v1/ip-tunnel")
+            }
+            val request = builder.post(requestBody).build()
             val runningCall = client.newCall(request)
             call = runningCall
             runningCall.execute().use { response ->
