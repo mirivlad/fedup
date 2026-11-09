@@ -139,6 +139,27 @@ ip netns exec "$CN" curl -4 -fsS --noproxy '*' -m 5 \
   http://10.77.0.1:8083/ | grep -q 'fedup-private-lab-okay'
 echo "TCP HTTP via encrypted IP TUN: PASS"
 
+# UDP datagrams also travel as IP payloads inside FrameKind::Datagram.
+ip netns exec "$SN" python3 -u - <<'PY' >"$TMP/udp.log" 2>&1 &
+import socket
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+s.bind(('10.77.0.1',53533))
+while True:
+    data,peer=s.recvfrom(4096)
+    s.sendto(data[::-1],peer)
+PY
+PIDS="$PIDS $!"
+sleep 0.2
+ip netns exec "$CN" python3 - <<'PY'
+import socket
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+s.settimeout(5)
+s.sendto(b'fedup-udp-packet',('10.77.0.1',53533))
+data,_=s.recvfrom(4096)
+assert data == b'tekcap-pdu-pudef', repr(data)
+print('UDP datagram across IP TUN: PASS')
+PY
+
 "$ADMIN" revoke "$TMP/allowed.txt" lab-device
 sleep 6
 if timeout 4 ip netns exec "$CN" ping -n -c 1 -W 1 10.77.0.1 >/dev/null 2>&1; then
