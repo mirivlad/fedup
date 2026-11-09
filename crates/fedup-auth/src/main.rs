@@ -93,8 +93,10 @@ fn reply(status: StatusCode) -> impl IntoResponse {
 }
 
 async fn login(State(state): State<Arc<App>>, Json(input): Json<Login>) -> impl IntoResponse {
-    if input.username.len() > 48 || input.password.len() > 128
-        || input.username.is_empty() || input.password.is_empty()
+    if input.username.len() > 48
+        || input.password.len() > 128
+        || input.username.is_empty()
+        || input.password.is_empty()
     {
         return reply(StatusCode::UNAUTHORIZED);
     }
@@ -132,7 +134,9 @@ fn app(users: PathBuf) -> Router {
 async fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     let [_, cmd, state, port, flag] = args.as_slice() else {
-        return Err("usage: fedup-auth serve <private-users-dir> <port> --behind-https-proxy".into());
+        return Err(
+            "usage: fedup-auth serve <private-users-dir> <port> --behind-https-proxy".into(),
+        );
     };
     if cmd != "serve" || flag != "--behind-https-proxy" {
         return Err("explicit --behind-https-proxy confirmation required".into());
