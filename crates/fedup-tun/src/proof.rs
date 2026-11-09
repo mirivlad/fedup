@@ -21,7 +21,6 @@ const CHALLENGE_TTL: Duration = Duration::from_secs(30);
 const MAX_CHALLENGES: usize = 128;
 const MAX_CERT_DER: usize = 8192;
 const MAX_SIGNATURE: usize = 256;
-pub const CHALLENGE_PATH: &str = "/fedup-lab/v1/challenge";
 pub const TUNNEL_PATH: &str = "/fedup-lab/v1/ip-tunnel";
 pub const PROBE_PATH: &str = "/fedup-lab/v1/auth-check";
 
@@ -132,6 +131,7 @@ pub fn message(method: &str, path: &str, challenge: &str, fingerprint: &str) -> 
 mod tests {
     use super::*;
     use openssl::asn1::Asn1Time;
+    use openssl::x509::extension::{BasicConstraints, ExtendedKeyUsage};
     use openssl::ec::{EcGroup, EcKey};
     use openssl::nid::Nid;
     use openssl::pkey::PKey;
@@ -155,13 +155,7 @@ mod tests {
             .unwrap();
         ca.set_not_after(Asn1Time::days_from_now(2).unwrap().as_ref())
             .unwrap();
-        let ca_ext = openssl::x509::X509Extension::new_nid(
-            None,
-            None,
-            Nid::BASIC_CONSTRAINTS,
-            "critical,CA:TRUE",
-        )
-        .unwrap();
+        let ca_ext = BasicConstraints::new().critical().ca().build().unwrap();
         ca.append_extension(ca_ext).unwrap();
         ca.sign(&ca_key, MessageDigest::sha256()).unwrap();
         let ca = ca.build();
@@ -181,9 +175,7 @@ mod tests {
             .unwrap();
         leaf.set_not_after(Asn1Time::days_from_now(1).unwrap().as_ref())
             .unwrap();
-        let usage =
-            openssl::x509::X509Extension::new_nid(None, None, Nid::EXT_KEY_USAGE, "clientAuth")
-                .unwrap();
+        let usage = ExtendedKeyUsage::new().client_auth().build().unwrap();
         leaf.append_extension(usage).unwrap();
         leaf.sign(&ca_key, MessageDigest::sha256()).unwrap();
         (
