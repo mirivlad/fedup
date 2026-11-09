@@ -2,7 +2,7 @@
 
 **FedUp** is an early-stage, open-source project for a self-hosted, cross-platform private network tunnel for personal and family use.
 
-> Status: **experimental routed Linux IPv4/IPv6 TUN over raw TLS or genuine HTTP/2, with encrypted device identities**. The Rust framing codec, one-shot mTLS lab, fixed-destination TCP forwarder, SSH-first device admin, offline invitation issuer and encrypted Linux device identity are NOT a VPN or production-ready network service. Do not rely on this project for anonymity or security-critical connectivity.
+> Status (10 Nov 2026): **experimental Android-to-VPS IPv4 Internet path implemented, not physically accepted**. In isolated CI namespaces, account-bound mTLS over genuine HTTP/2 carries HTTP and UDP DNS through VPS SNAT. Android has one-tap login/enrollment, a default IPv4 route and tunneled DNS. **Not production-safe:** disposable online CA, no complete crash kill switch, no live Android-to-VPS test, no stable signed APK or measured DPI resistance.
 
 ## Simple account login and automatic device enrollment (LAB only)
 
@@ -14,9 +14,7 @@ The experimental Linux HTTP/2 server can authorize those certificate fingerprint
 against the live user database and recheck revocation every five seconds.
 
 **Online signing is deliberately restricted to `--unsafe-lab-online-ca` with a
-disposable issuer. It is NOT safe for a real root CA or public VPS.** There is
-no full-tunnel Internet routing/DNS, production kill switch, real-phone verification
-or signed upgradeable Android release. See [Russian account guide](docs/ru/accounts.md)
+disposable issuer. It is NOT safe for a real root CA or public VPS.** There is an experimental IPv4 full-route and DNS mode, but no production kill switch, IPv6 egress, real-phone verification or stable signed upgradeable Android release. See [Russian account guide](docs/ru/accounts.md)
 and [English guide](docs/accounts.md).
 
 ## Goals
@@ -50,7 +48,7 @@ and [English guide](docs/accounts.md).
 
 ## Experimental laboratory
 
-An Android Kotlin **diagnostic-only** shell and its arm64 JNI adapter now exist (see [Russian Android guide](docs/ru/android.md) and [English guide](docs/android.md)); it deliberately cannot connect or establish TUN until server auth, identity, DNS and routes are verified.
+An Android Kotlin client (experimental VPS IPv4 preview plus separate lab diagnostics) and its arm64 JNI adapter now exist (see [Russian Android guide](docs/ru/android.md) and [English guide](docs/android.md)); the main Connect action automatically checks the account, registers a Keystore identity and (after user consent) attempts IPv4 VPN routing through the VPS.
 
 The current implementation includes an OS-independent **fedup-core** IP packet ACL (cross-checked for Windows GNU and Android ARM64 Rust targets), a separate namespace-only **fedup-netguard** privileged nftables policy helper, and a Linux TUN IP-packet laboratory with a third isolated routed/DNS endpoint (docs/tun.md), a genuine HTTP/2 streaming laboratory, also bridged into the isolated TUN modes server-h2/client-h2 (docs/http2.md), alongside a dependency-free Rust framing codec, a one-shot **loopback-only** mTLS 1.3 Ping/Pong lab, and an experimental **single-destination TCP forwarder**. The forwarder requires mutually authenticated TLS, an explicit device certificate allowlist and a fixed operator-configured target. The Linux fedup-admin CLI can initialize, list, add and revoke those allowed certificate fingerprints with atomic file updates. A new fedup-device CLI creates **encrypted client keys and signed CSRs** locally, verifies issued certificates, and fedup-link client-device uses enrollment-pinned server trust. It is not a full VPN, web protocol, or production-ready Internet-facing server.
 
@@ -110,6 +108,7 @@ IPv4 when visiting an external IP-check site; CI alone does not satisfy it.
 ## Read the design
 
 - [Project overview in Russian / О проекте по-русски](docs/ru/README.md)
+- [Status and acceptance matrix / Статус и приёмка](docs/ru/status-2026-11-10.md)
 - [Product requirements](docs/requirements.md)
 - [Threat model](docs/threat-model.md)
 - [Architecture decisions](docs/architecture.md)
