@@ -129,11 +129,13 @@ internal object TlsProbe {
         // remains enabled, with a trust store containing ONLY the pinned CA.
         val safeUrl = "https://" + device.serverName + ":" + endpoint.port +
             "/fedup-lab/v1/auth-check"
-        val dns = Dns { name ->
-            if (name != device.serverName) {
-                throw UnknownHostException("Unexpected DNS name")
+        val dns = object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> {
+                if (hostname != device.serverName) {
+                    throw UnknownHostException("Unexpected DNS name")
+                }
+                return InetAddress.getAllByName(endpoint.hostname).toList()
             }
-            InetAddress.getAllByName(endpoint.hostname).toList()
         }
         val http = OkHttpClient.Builder()
             .dns(dns)
