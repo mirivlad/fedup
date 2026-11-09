@@ -138,8 +138,12 @@ fn valid_ip(packet: &[u8], dir: Direction) -> bool {
             if flags_frag & 0x3fff != 0 {
                 return false;
             }
-            let src = IpAddr::V4(Ipv4Addr::new(packet[12], packet[13], packet[14], packet[15]));
-            let dst = IpAddr::V4(Ipv4Addr::new(packet[16], packet[17], packet[18], packet[19]));
+            let src = IpAddr::V4(Ipv4Addr::new(
+                packet[12], packet[13], packet[14], packet[15],
+            ));
+            let dst = IpAddr::V4(Ipv4Addr::new(
+                packet[16], packet[17], packet[18], packet[19],
+            ));
             let expected = addresses(dir);
             src == expected.0 && dst == expected.1
         }
@@ -152,7 +156,8 @@ fn valid_ip(packet: &[u8], dir: Direction) -> bool {
                 return false;
             }
             let src = Ipv6Addr::from(<[u8; 16]>::try_from(&packet[8..24]).expect("length checked"));
-            let dst = Ipv6Addr::from(<[u8; 16]>::try_from(&packet[24..40]).expect("length checked"));
+            let dst =
+                Ipv6Addr::from(<[u8; 16]>::try_from(&packet[24..40]).expect("length checked"));
             (src, dst) == addresses_v6(dir)
         }
         _ => false,
@@ -193,7 +198,9 @@ fn expect_open(frame: Frame) -> Result<()> {
 fn create_tun(name: &str) -> Result<Arc<Tun>> {
     if name.len() < 3
         || name.len() > 15
-        || !name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
     {
         return Err("TUN interface name must be 3-15 ASCII alphanumerics, _ or -".into());
     }
@@ -210,7 +217,12 @@ fn create_tun(name: &str) -> Result<Arc<Tun>> {
 
 /// Single VPN session. The TUN is NOT connected to any public egress.
 /// Only a fixed pair of /32 and /128 addresses is allowed.
-async fn forward<T>(stream: T, tun: Arc<Tun>, is_client: bool, revocation: Option<(PathBuf, String)>) -> Result<()>
+async fn forward<T>(
+    stream: T,
+    tun: Arc<Tun>,
+    is_client: bool,
+    revocation: Option<(PathBuf, String)>,
+) -> Result<()>
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
@@ -279,7 +291,10 @@ async fn server_session(
     allowlist: &Path,
 ) -> Result<()> {
     let mut tls = timeout(IO_TIMEOUT, acceptor.accept(socket)).await??;
-    let peer = tls.get_ref().1.peer_certificates()
+    let peer = tls
+        .get_ref()
+        .1
+        .peer_certificates()
         .and_then(|chain| chain.first())
         .ok_or("missing mTLS device certificate")?;
     let fp = fingerprint(peer.as_ref());
@@ -309,7 +324,7 @@ async fn server(
     let _ = authorized(allowlist, "")?;
     let config = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
         .with_client_cert_verifier(
-            rustls::server::WebPkiClientVerifier::builder(Arc::new(roots(ca)?)).build()?
+            rustls::server::WebPkiClientVerifier::builder(Arc::new(roots(ca)?)).build()?,
         )
         .with_single_cert(ca_certs(certificate)?, load_key(key)?)?;
     let acceptor = TlsAcceptor::from(Arc::new(config));
@@ -372,17 +387,31 @@ async fn main() {
     let result: Result<()> = async {
         match args.as_slice() {
             [_, cmd, bind, tun, ca, cert, key, allow] if cmd == "server" => {
-                server(bind.parse()?, tun, Path::new(ca), Path::new(cert), Path::new(key), Path::new(allow)).await
+                server(
+                    bind.parse()?,
+                    tun,
+                    Path::new(ca),
+                    Path::new(cert),
+                    Path::new(key),
+                    Path::new(allow),
+                )
+                .await
             }
             [_, cmd, addr, tun, device] if cmd == "client" => {
                 client(addr.parse()?, tun, Path::new(device), false).await
             }
-            [_, cmd, addr, tun, device, flag] if cmd == "client" && flag == "--passphrase-stdin" => {
+            [_, cmd, addr, tun, device, flag]
+                if cmd == "client" && flag == "--passphrase-stdin" =>
+            {
                 client(addr.parse()?, tun, Path::new(device), true).await
             }
-            _ => { usage(); Err("invalid arguments".into()) }
+            _ => {
+                usage();
+                Err("invalid arguments".into())
+            }
         }
-    }.await;
+    }
+    .await;
     if let Err(err) = result {
         eprintln!("fedup-tun: {err}");
         std::process::exit(1);
@@ -392,53 +421,68 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn ipv4_packet(source: [u8;4], dest: [u8;4]) -> Vec<u8> {
+    fn ipv4_packet(source: [u8; 4], dest: [u8; 4]) -> Vec<u8> {
         let mut p = vec![0u8; 28];
-        p[0]=0x45; p[2..4].copy_from_slice(&(28u16).to_be_bytes());
-        p[8]=64; p[9]=1; p[12..16].copy_from_slice(&source); p[16..20].copy_from_slice(&dest);
+        p[0] = 0x45;
+        p[2..4].copy_from_slice(&(28u16).to_be_bytes());
+        p[8] = 64;
+        p[9] = 1;
+        p[12..16].copy_from_slice(&source);
+        p[16..20].copy_from_slice(&dest);
         p
     }
     fn ipv6_packet(source: Ipv6Addr, dest: Ipv6Addr) -> Vec<u8> {
-        let mut p=vec![0u8; 48]; p[0]=0x60; p[4..6].copy_from_slice(&(8u16).to_be_bytes());
-        p[6]=58; p[7]=64; p[8..24].copy_from_slice(&source.octets());
-        p[24..40].copy_from_slice(&dest.octets()); p
+        let mut p = vec![0u8; 48];
+        p[0] = 0x60;
+        p[4..6].copy_from_slice(&(8u16).to_be_bytes());
+        p[6] = 58;
+        p[7] = 64;
+        p[8..24].copy_from_slice(&source.octets());
+        p[24..40].copy_from_slice(&dest.octets());
+        p
     }
 
     #[test]
     fn ipv4_valid_lengths_and_directions() {
-        let mut pkt=ipv4_packet([10,77,0,2],[10,77,0,1]);
-        assert!(valid_ip(&pkt,Direction::ClientToServer));
-        assert!(!valid_ip(&pkt,Direction::ServerToClient));
-        pkt[2]=0;pkt[3]=27;
-        assert!(!valid_ip(&pkt,Direction::ClientToServer));
-        pkt[2]=0;pkt[3]=28;
-        pkt[6]=0x20; // disallowed fragmented source
-        assert!(!valid_ip(&pkt,Direction::ClientToServer));
+        let mut pkt = ipv4_packet([10, 77, 0, 2], [10, 77, 0, 1]);
+        assert!(valid_ip(&pkt, Direction::ClientToServer));
+        assert!(!valid_ip(&pkt, Direction::ServerToClient));
+        pkt[2] = 0;
+        pkt[3] = 27;
+        assert!(!valid_ip(&pkt, Direction::ClientToServer));
+        pkt[2] = 0;
+        pkt[3] = 28;
+        pkt[6] = 0x20; // disallowed fragmented source
+        assert!(!valid_ip(&pkt, Direction::ClientToServer));
     }
 
     #[test]
     fn blocks_ip_spoofing_unknown_version_and_oversized_packets() {
-        let bad=ipv4_packet([198,51,100,1],[10,77,0,1]);
-        assert!(!valid_ip(&bad,Direction::ClientToServer));
-        let mut wrong=ipv4_packet([10,77,0,2],[10,77,0,1]);
-        wrong[0]=0x75;
-        assert!(!valid_ip(&wrong,Direction::ClientToServer));
-        assert!(!valid_ip(&vec![0u8;MAX_PACKET+1],Direction::ClientToServer));
+        let bad = ipv4_packet([198, 51, 100, 1], [10, 77, 0, 1]);
+        assert!(!valid_ip(&bad, Direction::ClientToServer));
+        let mut wrong = ipv4_packet([10, 77, 0, 2], [10, 77, 0, 1]);
+        wrong[0] = 0x75;
+        assert!(!valid_ip(&wrong, Direction::ClientToServer));
+        assert!(!valid_ip(
+            &vec![0u8; MAX_PACKET + 1],
+            Direction::ClientToServer
+        ));
     }
 
     #[test]
     fn ipv6_pairs_and_lengths() {
-        let (src,dst)=addresses_v6(Direction::ClientToServer);
-        let mut packet=ipv6_packet(src,dst);
-        assert!(valid_ip(&packet,Direction::ClientToServer));
-        assert!(!valid_ip(&packet,Direction::ServerToClient));
-        packet[4]=0;packet[5]=7;
-        assert!(!valid_ip(&packet,Direction::ClientToServer));
+        let (src, dst) = addresses_v6(Direction::ClientToServer);
+        let mut packet = ipv6_packet(src, dst);
+        assert!(valid_ip(&packet, Direction::ClientToServer));
+        assert!(!valid_ip(&packet, Direction::ServerToClient));
+        packet[4] = 0;
+        packet[5] = 7;
+        assert!(!valid_ip(&packet, Direction::ClientToServer));
     }
 
     #[test]
     fn rejects_unexpected_open_frames() {
-        let bad=Frame::new(FrameKind::Datagram,1,vec![]).unwrap();
+        let bad = Frame::new(FrameKind::Datagram, 1, vec![]).unwrap();
         assert!(expect_open(bad).is_err());
     }
 }
