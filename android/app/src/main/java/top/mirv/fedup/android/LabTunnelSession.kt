@@ -24,6 +24,7 @@ internal class LabTunnelSession(
     private val service: VpnService,
     private val identity: EnrollmentManager,
     private val endpoint: String,
+    private val internetV4: Boolean,
     private val onReady: () -> Unit
 ) {
     @Volatile private var stopped = false
@@ -52,19 +53,31 @@ internal class LabTunnelSession(
                 "VPN permission revoked during authentication"
             }
 
-            // Deliberately no default route, DNS server, allowBypass(), or
-            // unrestricted CIDR. Static routes match fedup-core::isolated_lab.
-            val fd = service.Builder()
-                .setSession("FedUp LAB — no Internet protection")
+            // A separate opt-in IPv4-only VPS session. The Android TUN
+            // captures all IPv4 traffic, including DNS, while IPv6 packets
+            // are routed into the TUN and deliberately discarded. No IPv6
+            // packet can be forwarded until real IPv6 egress is implemented.
+            val builder = service.Builder()
+                .setSession(if (internetV4) "FedUp VPS IPv4 (experimental)"
+                    else "FedUp LAB — no Internet protection")
                 .setMtu(PacketCodec.MTU)
                 .setBlocking(true)
-                .addAddress("10.77.0.2", 30)
-                .addRoute("10.77.0.1", 32)
-                .addRoute("10.88.0.10", 32)
-                .addAddress("fd42:fed0::2", 64)
-                .addRoute("fd42:fed0::1", 128)
-                .addRoute("fd42:fed1::10", 128)
-                .establish() ?: error("Android refused to establish the lab interface")
+            if (internetV4) {
+                builder.addAddress("10.77.0.2", 30)
+                    .addRoute("0.0.0.0", 0)
+                    .addDnsServer("1.1.1.1")
+                    .addAddress("fd42:fed0::2", 128)
+                    .addRoute("::", 0)
+            } else {
+                builder.addAddress("10.77.0.2", 30)
+                    .addRoute("10.77.0.1", 32)
+                    .addRoute("10.88.0.10", 32)
+                    .addAddress("fd42:fed0::2", 64)
+                    .addRoute("fd42:fed0::1", 128)
+                    .addRoute("fd42:fed1::10", 128)
+            }
+            val fd = builder.establish()
+                ?: error("Android refused to establish the VPN interface")
             tun = fd
             onReady()
 
@@ -87,7 +100,10 @@ internal class LabTunnelSession(
                         }
                         if (count < 0) return
                         if (count < 20 || count > PacketCodec.MTU) continue
-                        if (!NativePacketPolicy.admits(buf.copyOf(count), true)) continue
+                        val valid = if (internetV4)
+                            NativePacketPolicy.admitsInternetV4(buf.copyOf(count), true)
+                        else NativePacketPolicy.admits(buf.copyOf(count), true)
+                        if (!valid) continue
                         PacketCodec.send(sink, buf, count)
                     }
                 }
@@ -105,7 +121,9 @@ internal class LabTunnelSession(
                 val input = response.body?.byteStream() ?: error("No HTTP/2 response body")
                 while (!stopped) {
                     val packet = PacketCodec.receive(input) ?: error("Tunnel stream ended")
-                    check(NativePacketPolicy.admits(packet, false)) {
+                    check(if (internetV4)
+                        NativePacketPolicy.admitsInternetV4(packet, false)
+                    else NativePacketPolicy.admits(packet, false)) {
                         "Invalid or spoofed packet received from server"
                     }
                     write.write(packet)
