@@ -14,6 +14,12 @@ done
 umask 077
 ROOT="$PWD"
 TUN="$ROOT/target/debug/fedup-tun"
+AUTH_MODE="${FEDUP_VPS_AUTH_MODE:-mtls}"
+case "$AUTH_MODE" in
+  mtls) SERVER_CMD=server-vps-v4; CLIENT_CMD=client-vps-v4; PROBE_CMD="" ;;
+  proof) SERVER_CMD=server-vps-proof-v4; CLIENT_CMD=client-vps-proof-v4; PROBE_CMD=probe-vps-proof ;;
+  *) echo "unknown FEDUP_VPS_AUTH_MODE: $AUTH_MODE" >&2; exit 2 ;;
+esac
 USERS="$ROOT/target/debug/fedup-users"
 AUTH="$ROOT/target/debug/fedup-auth"
 DEVICE="$ROOT/target/debug/fedup-device"
@@ -128,7 +134,7 @@ while True:
     s.sendto(b"fedup-test-dns-reply:"+payload+b"|seen-source="+peer[0].encode(),peer)
 ' >"$TMP/udp.log" 2>&1 &
 PIDS="$PIDS $!"
-ip netns exec "$SN" "$TUN" server-vps-v4 172.31.44.1:7443 \
+ip netns exec "$SN" "$TUN" "$SERVER_CMD" 172.31.44.1:7443 \
   futserver "$TMP/ca.pem" "$TMP/server.pem" "$TMP/server.key" \
   "$TMP/users" --unsafe-experimental-public-egress \
   >"$TMP/server.log" 2>&1 &
@@ -205,11 +211,27 @@ for proto in --http1.1 --http2; do
   }
 done
 echo "Anonymous HEAD HTTP/1.1 and HTTP/2 status 200: PASS"
+if [[ "$AUTH_MODE" == proof ]]; then
+  # An active TLS client must NOT be asked for a certificate at handshake.
+  # OpenSSL can decrypt its own post-ServerHello handshake for inspection;
+  # passive observers cannot read these TLS 1.3 handshake contents.
+  timeout 6 ip netns exec "$CN" openssl s_client -connect 172.31.44.1:7443 \
+    -servername localhost -tls1_3 -alpn h2 -msg </dev/null \
+    >"$TMP/tls-handshake.log" 2>&1 || :
+  if grep -q 'CertificateRequest' "$TMP/tls-handshake.log"; then
+    cat "$TMP/tls-handshake.log" >&2
+    echo "FAIL: app-proof outer TLS requested a device certificate" >&2
+    exit 1
+  fi
+  printf '%s\n' "$PASS" | timeout 12 ip netns exec "$CN" "$TUN" \
+    "$PROBE_CMD" 172.31.44.1:7443 "$TMP/device" --passphrase-stdin
+  echo "Ordinary TLS without ClientCertificateRequest; signed device proof: PASS"
+fi
 echo "HTTP/2 reuse: 2 page requests over 1 TLS connection: PASS"
 echo "Anonymous HTTP/1.1 and HTTP/2 web fallback; protected URL denied: PASS"
 echo "Unauthenticated idle TLS socket deliberately held open"
 printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" \
-  client-vps-v4 172.31.44.1:7443 futclient "$TMP/device" \
+  "$CLIENT_CMD" 172.31.44.1:7443 futclient "$TMP/device" \
   --passphrase-stdin >"$TMP/client.log" 2>&1 &
 PIDS="$PIDS $!"
 for _ in $(seq 1 80); do
@@ -263,12 +285,12 @@ echo "Active anonymous probe denied; authenticated tunnel still routes packets: 
 # address allocator and TUN demultiplexer exist. The second connection can
 # authenticate, but must NOT see first device traffic or create another TUN.
 if printf '%s\n' "$PASS" | timeout 8 ip netns exec "$CN" "$TUN" \
-    client-vps-v4 172.31.44.1:7443 futother "$TMP/device" \
+    "$CLIENT_CMD" 172.31.44.1:7443 futother "$TMP/device" \
     --passphrase-stdin >"$TMP/second-client.log" 2>&1; then
   echo "FAIL: a second session reused the shared single-device TUN" >&2
   exit 1
 fi
-if ! grep -q "HTTP/2 tunnel request rejected by server" "$TMP/second-client.log"; then
+if ! grep -Eq "HTTP/2 tunnel request rejected by server|application-authorized packet tunnel rejected" "$TMP/second-client.log"; then
   cat "$TMP/second-client.log" >&2
   echo "FAIL: second session did not receive an explicit refusal" >&2
   exit 1
