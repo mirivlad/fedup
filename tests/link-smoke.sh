@@ -3,7 +3,8 @@
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 LINK=target/debug/fedup-link
-[[ -x "$LINK" ]] || { echo "Build first: cargo build -p fedup-link" >&2; exit 2; }
+ADMIN=target/debug/fedup-admin
+[[ -x "$LINK" && -x "$ADMIN" ]] || { echo "Build first: cargo build -p fedup-link -p fedup-admin" >&2; exit 2; }
 umask 077
 TEMP="$(mktemp -d)"
 PIDS=""
@@ -45,7 +46,13 @@ for label in server client unauthorized; do
     -set_serial "$serial" -days 1 -out "$TEMP/$label.pem" \
     -extfile "$TEMP/$ext.ext" >/dev/null 2>&1
 done
-"$LINK" fingerprint "$TEMP/client.pem" > "$TEMP/allowed.txt"
+"$ADMIN" init "$TEMP/allowed.txt"
+"$ADMIN" add "$TEMP/allowed.txt" family-phone "$TEMP/client.pem"
+"$ADMIN" list "$TEMP/allowed.txt" | grep -q 'family-phone'
+[[ "$(stat -c '%a' "$TEMP/allowed.txt")" == "600" ]] || {
+  echo 'SECURITY FAILURE: allowlist permissions are too broad' >&2
+  exit 1
+}
 get_port() {
   python3 - <<'PY'
 import socket
@@ -138,7 +145,11 @@ for i in $(seq 1 50); do
   sleep 0.1
 done
 [[ -f "$TEMP/revocation-ready" ]] || { echo 'Failed to establish revocation test' >&2; exit 1; }
-: > "$TEMP/allowed.txt"
+"$ADMIN" revoke "$TEMP/allowed.txt" family-phone
+if "$ADMIN" list "$TEMP/allowed.txt" | grep -q 'family-phone'; then
+  echo 'SECURITY FAILURE: revoked identity still listed' >&2
+  exit 1
+fi
 wait "$REVOKE_PID"
 cat "$TEMP/revocation.log"
 python3 - "$CLIENT_PORT" <<'PY'
@@ -152,4 +163,18 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), 5) as s:
     assert not data, "revoked client exchanged data"
 print("Revoked identity: new session denied")
 PY
-echo "FedUp experimental TCP link smoke test: PASS"
+# A second temporary allowlist exercises named inventory and selective revocation.
+"$ADMIN" init "$TEMP/extra-allowlist.txt"
+"$ADMIN" add "$TEMP/extra-allowlist.txt" family-phone "$TEMP/client.pem"
+"$ADMIN" add "$TEMP/extra-allowlist.txt" family-laptop "$TEMP/unauthorized.pem"
+if "$ADMIN" add "$TEMP/extra-allowlist.txt" family-phone "$TEMP/unauthorized.pem" >/dev/null 2>&1; then
+  echo 'SECURITY FAILURE: duplicate device name was accepted' >&2
+  exit 1
+fi
+"$ADMIN" revoke "$TEMP/extra-allowlist.txt" "$("$ADMIN" fingerprint "$TEMP/client.pem")"
+"$ADMIN" list "$TEMP/extra-allowlist.txt" | grep -q 'family-laptop'
+if "$ADMIN" list "$TEMP/extra-allowlist.txt" | grep -q 'family-phone'; then
+  echo 'SECURITY FAILURE: revoked device still exists in inventory' >&2
+  exit 1
+fi
+echo "FedUp experimental TCP link + admin smoke test: PASS"
