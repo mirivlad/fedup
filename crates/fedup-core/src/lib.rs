@@ -174,6 +174,54 @@ impl IpPolicy {
     }
 }
 
+/// IPv4-only Internet acceptance for a *single* device. IPv6 is rejected
+/// until a genuine IPv6 egress path and DNS/kill-switch policy are tested.
+/// This is a packet-spoofing boundary, NOT a host firewall or a VPN itself.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct InternetV4Policy;
+
+impl InternetV4Policy {
+    pub fn admits(self, packet: &[u8], direction: Direction) -> bool {
+        if !(20..=LAB_MTU).contains(&packet.len()) || packet[0] != 0x45 {
+            return false;
+        }
+        let length = u16::from_be_bytes([packet[2], packet[3]]) as usize;
+        if length != packet.len() {
+            return false;
+        }
+        // Reject all fragments, IPv4 options and reserved flags to avoid
+        // bypassing policy via reassembly or nested headers. DF is permitted.
+        let flags = u16::from_be_bytes([packet[6], packet[7]]);
+        if flags & 0xbfff != 0 || packet[8] == 0 {
+            return false;
+        }
+        let src = Ipv4Addr::new(packet[12], packet[13], packet[14], packet[15]);
+        let dst = Ipv4Addr::new(packet[16], packet[17], packet[18], packet[19]);
+        let phone = Ipv4Addr::new(10, 77, 0, 2);
+        match direction {
+            Direction::ClientToServer => src == phone && public_destination_v4(dst),
+            Direction::ServerToClient => dst == phone && public_destination_v4(src),
+        }
+    }
+}
+
+/// Exclude RFC1918, loopback, link-local, CGNAT, documentation, multicast,
+/// broadcast, and other special ranges. Explicitly forbid the gateway's
+/// management networks even when the Android device requests them.
+fn public_destination_v4(ip: Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    match a {
+        0 | 10 | 127 | 224..=255 => false,
+        100 if (64..=127).contains(&b) => false,
+        169 if b == 254 => false,
+        172 if (16..=31).contains(&b) => false,
+        192 if b == 168 || (b == 0 && (c == 0 || c == 2)) => false,
+        198 if (b == 18 || b == 19) || (b == 51 && c == 100) => false,
+        203 if b == 0 && c == 113 => false,
+        _ => true,
+    }
+}
+
 fn valid_v4(ip: Ipv4Addr) -> bool {
     !ip.is_unspecified() && !ip.is_broadcast() && !ip.is_multicast() && !ip.is_loopback()
 }
@@ -335,4 +383,27 @@ mod tests {
             let _ = policy.admits(&packet, Direction::ClientToServer);
         }
     }
+    #[test]
+    fn internet_ipv4_only_requires_phone_source_and_public_destination() {
+        let internet = InternetV4Policy;
+        for remote in [[9,9,9,9], [1,1,1,1], [8,8,8,8]] {
+            assert!(internet.admits(&v4([10,77,0,2],remote), Direction::ClientToServer));
+            assert!(internet.admits(&v4(remote,[10,77,0,2]), Direction::ServerToClient));
+            assert!(!internet.admits(&v4(remote,[10,77,0,2]), Direction::ClientToServer));
+        }
+        for invalid in [[10,0,0,1], [192,168,1,1], [172,16,1,1],
+                        [127,0,0,1], [169,254,1,2], [100,64,0,1],
+                        [198,51,100,7], [203,0,113,1], [224,0,0,1],
+                        [0,0,0,0], [255,255,255,255]] {
+            assert!(!internet.admits(&v4([10,77,0,2],invalid), Direction::ClientToServer));
+        }
+        assert!(!internet.admits(&v4([10,77,0,3],[9,9,9,9]), Direction::ClientToServer));
+        assert!(!internet.admits(&v4([9,9,9,9],[10,77,0,3]), Direction::ServerToClient));
+        let ipv6=v6("fd42:fed0::2".parse().unwrap(), "2606:4700:4700::1111".parse().unwrap());
+        assert!(!internet.admits(&ipv6,Direction::ClientToServer));
+        let mut fragmented = v4([10,77,0,2],[9,9,9,9]);
+        fragmented[6]=0x20;
+        assert!(!internet.admits(&fragmented,Direction::ClientToServer));
+    }
+
 }
