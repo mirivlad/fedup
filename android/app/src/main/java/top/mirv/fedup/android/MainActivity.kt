@@ -90,9 +90,9 @@ class MainActivity : Activity() {
         }
         label(layout, "FedUp")
         layout.addView(TextView(this).apply {
-            text = "Добавьте сервер и введите учётные данные. " +
-                "Пока проверяется только авторизация; автоматическая регистрация устройства " +
-                "и обычное VPN-подключение ещё в разработке."
+            text = "Введите сервер, логин и пароль — приложение само зарегистрирует ключ " +
+                "телефона и проверит сертификат. Лабораторный VPN поддерживает " +
+                "только тестовые адреса; полный интернет-туннель ещё не готов."
         })
         status = TextView(this).apply { textSize = 15f; setPadding(0, 16, 0, 16) }
         layout.addView(status)
@@ -119,7 +119,7 @@ class MainActivity : Activity() {
         }
         layout.addView(password, ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT)
-        action(layout, "Проверить доступ") {
+        action(layout, "Войти и зарегистрировать телефон") {
             val host = server.text.toString().trim()
             val username = login.text.toString().trim()
             val secret = password.text.toString()
@@ -129,15 +129,15 @@ class MainActivity : Activity() {
             Thread {
                 try {
                     AccountLogin.check(host, username, secret)
-                    // Persist only authenticated AES-GCM ciphertext; never
-                    // store the password in normal SharedPreferences.
+                    val result = AutomaticEnrollment(this).register(host, username, secret)
+                    // Save credentials only after complete account and device
+                    // registration. A failed enrollment is not a VPN success.
                     CredentialsVault(this).save(secret)
                     prefs.edit().putString("server", host)
                         .putString("username", username).apply()
                     runOnUiThread {
-                        message("Учётная запись подтверждена сервером. Пароль сохранён " +
-                            "в зашифрованном виде с ключом Android Keystore. " +
-                            "Автоматическая регистрация устройства и VPN-подключение пока не готовы.")
+                        message(result + "\nДоступ выдан, но полный VPN-туннель и DNS ещё " +
+                            "не настроены. Для проверки тестовой сети откройте диагностику.")
                     }
                 } catch (error: Exception) {
                     runOnUiThread {
