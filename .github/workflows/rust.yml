@@ -136,6 +136,21 @@ jobs:
       - name: Check OS-independent core for Linux
         run: cargo test -p fedup-core
 
+  vps-egress-namespace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install isolated routing test tools
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iproute2 iputils-ping nftables curl openssl
+      - name: Build account issuer, Linux device and HTTP2 IPv4 gateway
+        run: cargo build -p fedup-tun -p fedup-users -p fedup-auth -p fedup-enroll -p fedup-identity
+      - name: Verify scoped IPv4 NAT with real signed device, DNS UDP and account revocation
+        run: sudo bash tests/vps-egress-smoke.sh
+
   tun-namespace:
     runs-on: ubuntu-latest
     timeout-minutes: 35
