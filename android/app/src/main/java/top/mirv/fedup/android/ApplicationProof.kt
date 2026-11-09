@@ -80,7 +80,7 @@ internal object ApplicationProof {
             .connectTimeout(6, TimeUnit.SECONDS)
             .pingInterval(15, TimeUnit.SECONDS)
             .build()
-        return Pair(client, "https://\${device.serverName}:443")
+        return Pair(client, "https://${device.serverName}:443")
     }
 
     /** Exactly one server-generated nonce for each signed HTTP request. */
@@ -145,7 +145,7 @@ internal object ApplicationProof {
             .readTimeout(8, TimeUnit.SECONDS).build()
             .newCall(req).execute().use { reply ->
                 require(reply.protocol == Protocol.HTTP_2 && reply.code == 204) {
-                    "Server rejected signed device proof (HTTP \${reply.code})"
+                    "Server rejected signed device proof (HTTP ${reply.code})"
                 }
             }
     }
