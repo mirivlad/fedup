@@ -1,0 +1,41 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Dart / Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+
+# Android / Gradle
+.gradle/
+**/local.properties
+**/captures/
+*.jks
+*.keystore
+*.apk
+*.aab
+
+# Environment and private configs
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+*.ovpn
+*.conf.local
+private/
+secrets/
+credentials/
+invitations/
+*.pcap
+*.pcapng
+
+# Editor / system
+.idea/
+.vscode/
+.DS_Store
+*.swp
