@@ -343,6 +343,9 @@ if timeout 6 ip netns exec "$CN" curl -kfsS --noproxy '*' \
 fi
 timeout 6 ip netns exec "$CN" ping -n -c 1 -W 2 9.9.9.9 >/dev/null
 echo "Active anonymous probe denied; authenticated tunnel still routes packets: PASS"
+# Active DPI-style probes must not gain an HTTP response oracle merely
+# because a different client already holds the long-lived TUN stream.
+ip netns exec "$CN" python3 tools/active-probe.py --lab
 # A second ordinary HTTPS visitor must still see a public page WHILE
 # the first device maintains its long-lived HTTP/2 TUN. With Caddy h2c
 # different client requests can be multiplexed on one backend connection.
