@@ -4,6 +4,8 @@ use super::*;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use openssl::pkey::PKey;
 use openssl::sign::Signer;
+use rand::{rngs::OsRng, RngCore};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn headers_for_proof(
     cert_der: &[u8],
@@ -26,11 +28,26 @@ fn headers_for_proof(
 async fn get_challenge(
     sender: &mut h2_client::SendRequest<Bytes>,
     hostname: &str,
+    cert_der: &[u8],
+    private_der: &[u8],
 ) -> Result<String> {
     *sender = timeout(IO_TIMEOUT, sender.clone().ready()).await??;
+    let mut raw = [0u8; 32];
+    OsRng.fill_bytes(&mut raw);
+    let init = URL_SAFE_NO_PAD.encode(raw);
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs().to_string();
+    let fp = fingerprint(cert_der);
+    let signed = proof::init_message(&init, &timestamp, &fp);
+    let key = PKey::private_key_from_der(private_der)?;
+    let mut signer = Signer::new(openssl::hash::MessageDigest::sha256(), &key)?;
+    signer.update(signed.as_bytes())?;
     let request = Request::builder()
         .method(http::Method::GET)
         .uri(format!("https://{hostname}/"))
+        .header("x-device-init", init)
+        .header("x-device-time", timestamp)
+        .header("x-device-certificate", URL_SAFE_NO_PAD.encode(cert_der))
+        .header("x-device-proof", URL_SAFE_NO_PAD.encode(signer.sign_to_vec()?))
         .body(())?;
     let (response, _) = sender.send_request(request, true)?;
     let response = timeout(IO_TIMEOUT, response).await??;
@@ -83,7 +100,7 @@ pub(super) async fn connect(
     }
     let (mut sender, connection) = timeout(IO_TIMEOUT, h2_client::handshake(tls)).await??;
     let driver = tokio::spawn(connection);
-    let nonce = get_challenge(&mut sender, &hostname).await?;
+    let nonce = get_challenge(&mut sender, &hostname, cert_der, private.as_ref()).await?;
     let (cert, signature) = headers_for_proof(
         cert_der,
         private.as_ref(),
