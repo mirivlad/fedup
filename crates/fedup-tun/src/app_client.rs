@@ -4,6 +4,9 @@ use super::*;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use openssl::pkey::PKey;
 use openssl::sign::Signer;
+use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode, SslVersion};
+use std::pin::Pin;
+use tokio_openssl::SslStream;
 use rand::{rngs::OsRng, RngCore};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -82,6 +85,7 @@ pub(super) async fn connect(
     directory: &Path,
     password_stdin: bool,
     auth_only: bool,
+    openssl_tls: bool,
 ) -> Result<()> {
     require_isolated_network_namespace()?;
     if !private_lab_ip(server) {
@@ -93,6 +97,31 @@ pub(super) async fn connect(
     let certs = ca_certs(&device.cert_path)?;
     let cert_der = certs.first().ok_or("missing device certificate")?.as_ref();
     let hostname = device.server_name;
+    if openssl_tls {
+        // Experimental comparison with ordinary curl/OpenSSL: use the
+        // *unmodified* standard OpenSSL ClientHello rather than manufacturing
+        // a TLS fingerprint. Verification of CA, DNS name and ALPN is still
+        // mandatory; device identity is checked by signed HTTP application proof.
+        let mut builder = SslConnector::builder(SslMethod::tls_client())?;
+        builder.set_min_proto_version(Some(SslVersion::TLS1_3))?;
+        builder.set_max_proto_version(Some(SslVersion::TLS1_3))?;
+        builder.set_verify(SslVerifyMode::PEER);
+        builder.set_ca_file(&device.ca_path)?;
+        builder.set_alpn_protos(b"\x02h2\x08http/1.1")?;
+        let ssl = builder
+            .build()
+            .configure()?
+            .verify_hostname(true)
+            .into_ssl(&hostname)?;
+        let socket = timeout(IO_TIMEOUT, TcpStream::connect(server)).await??;
+        let mut tls = SslStream::new(ssl, socket)?;
+        timeout(IO_TIMEOUT, Pin::new(&mut tls).connect()).await??;
+        if tls.ssl().selected_alpn_protocol() != Some(b"h2".as_slice()) {
+            return Err("OpenSSL client did not negotiate real HTTP/2".into());
+        }
+        return run_h2(tls, tun_name, &hostname, cert_der, private.as_ref(), auth_only).await;
+    }
+
     let mut config = ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
         .with_root_certificates(roots(&device.ca_path)?)
         .with_no_client_auth();
@@ -104,12 +133,26 @@ pub(super) async fn connect(
     if tls.get_ref().1.alpn_protocol() != Some(b"h2".as_slice()) {
         return Err("app-proof gateway did not negotiate real HTTP/2".into());
     }
+    run_h2(tls, tun_name, &hostname, cert_der, private.as_ref(), auth_only).await
+}
+
+async fn run_h2<S>(
+    tls: S,
+    tun_name: &str,
+    hostname: &str,
+    cert_der: &[u8],
+    private_der: &[u8],
+    auth_only: bool,
+) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let (mut sender, connection) = timeout(IO_TIMEOUT, h2_client::handshake(tls)).await??;
     let driver = tokio::spawn(connection);
-    let nonce = get_challenge(&mut sender, &hostname, cert_der, private.as_ref()).await?;
+    let nonce = get_challenge(&mut sender, hostname, cert_der, private_der).await?;
     let (cert, signature) = headers_for_proof(
         cert_der,
-        private.as_ref(),
+        private_der,
         if auth_only { "GET" } else { "POST" },
         if auth_only {
             proof::PROBE_PATH

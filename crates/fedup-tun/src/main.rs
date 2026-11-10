@@ -886,7 +886,9 @@ fedup-tun client-h2 <private-server-ip:port> <tun-name> <enrolled-device-dir> [-
 fedup-tun probe-h2 <private-server-ip:port> <enrolled-device-dir> [--passphrase-stdin]
 fedup-tun client-vps-v4 <private-test-server-ip:port> <tun-name> <device-dir> [--passphrase-stdin]
 fedup-tun client-vps-proof-v4 <private-test-server-ip:port> <tun-name> <device-dir> [--passphrase-stdin]
+fedup-tun client-vps-proof-ossl-v4 <private-test-server-ip:port> <tun-name> <device-dir> [--passphrase-stdin]
 fedup-tun probe-vps-proof <private-test-server-ip:port> <device-dir> [--passphrase-stdin]
+fedup-tun probe-vps-proof-ossl <private-test-server-ip:port> <device-dir> [--passphrase-stdin]
 
 Fixed peers: 10.77.0.2 <-> 10.77.0.1 or 10.88.0.10, and
 fd42:fed0::2 <-> fd42:fed0::1 or fd42:fed1::10.
@@ -974,21 +976,59 @@ async fn main() {
                 )
                 .await
             }
-            [_, cmd, addr, tun, device] if cmd == "client-vps-proof-v4" => {
-                app_client::connect(addr.parse()?, tun, Path::new(device), false, false).await
+            [_, cmd, addr, tun, device]
+                if cmd == "client-vps-proof-v4" || cmd == "client-vps-proof-ossl-v4" =>
+            {
+                app_client::connect(
+                    addr.parse()?,
+                    tun,
+                    Path::new(device),
+                    false,
+                    false,
+                    cmd == "client-vps-proof-ossl-v4",
+                )
+                .await
             }
             [_, cmd, addr, tun, device, flag]
-                if cmd == "client-vps-proof-v4" && flag == "--passphrase-stdin" =>
+                if (cmd == "client-vps-proof-v4" || cmd == "client-vps-proof-ossl-v4")
+                    && flag == "--passphrase-stdin" =>
             {
-                app_client::connect(addr.parse()?, tun, Path::new(device), true, false).await
+                app_client::connect(
+                    addr.parse()?,
+                    tun,
+                    Path::new(device),
+                    true,
+                    false,
+                    cmd == "client-vps-proof-ossl-v4",
+                )
+                .await
             }
-            [_, cmd, addr, device] if cmd == "probe-vps-proof" => {
-                app_client::connect(addr.parse()?, "", Path::new(device), false, true).await
+            [_, cmd, addr, device]
+                if cmd == "probe-vps-proof" || cmd == "probe-vps-proof-ossl" =>
+            {
+                app_client::connect(
+                    addr.parse()?,
+                    "",
+                    Path::new(device),
+                    false,
+                    true,
+                    cmd == "probe-vps-proof-ossl",
+                )
+                .await
             }
             [_, cmd, addr, device, flag]
-                if cmd == "probe-vps-proof" && flag == "--passphrase-stdin" =>
+                if (cmd == "probe-vps-proof" || cmd == "probe-vps-proof-ossl")
+                    && flag == "--passphrase-stdin" =>
             {
-                app_client::connect(addr.parse()?, "", Path::new(device), true, true).await
+                app_client::connect(
+                    addr.parse()?,
+                    "",
+                    Path::new(device),
+                    true,
+                    true,
+                    cmd == "probe-vps-proof-ossl",
+                )
+                .await
             }
             [_, cmd, addr, tun, device] if cmd == "client-vps-v4" => {
                 client(
