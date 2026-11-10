@@ -95,16 +95,21 @@ def collect(pcap):
     return sorted(matches, key=lambda x: x["first"])
 
 
-def compare(baseline, vpn):
+def compare(baseline, vpn, long_stream=False):
     controls = collect(baseline)
     devices = collect(vpn)
-    if len(controls) < 8 or not devices:
-        raise ValueError("missing required 8 control flows or signed FedUp flow")
-    controls = controls[:8]
+    required = 1 if long_stream else 8
+    if len(controls) < required or not devices:
+        raise ValueError(f"missing required {required} reference flows or signed FedUp flow")
+    controls = controls[:required]
     device = devices[0]
     return {
         "scope": "disposable Linux namespaces, synthetic VPS TLS port 7443",
-        "reference": "8 curl/OpenSSL HTTPS/2 GET requests with matched TLS 1.3 SNI and ALPN",
+        "reference": (
+            "One ordinary five-second Caddy HTTP/2 chunked streaming response"
+            if long_stream else
+            "Eight short curl/OpenSSL HTTPS/2 GET requests"
+        ) + " with matched TLS 1.3 SNI and ALPN",
         "vpn": "first signed Linux FedUp HTTP/2 packet tunnel in its capture",
         "reference_sessions": len(controls),
         "reference_median_duration_ms": statistics.median(x["duration_ms"] for x in controls),
@@ -131,8 +136,10 @@ def main():
     parser.add_argument("baseline", type=Path)
     parser.add_argument("vpn", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--long-stream", action="store_true",
+                        help="one ordinary five-second streaming HTTPS/2 reference")
     args = parser.parse_args()
-    result = compare(args.baseline, args.vpn)
+    result = compare(args.baseline, args.vpn, long_stream=args.long_stream)
     blob = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
     if args.output:
         with args.output.open("x", encoding="utf-8") as dest:
