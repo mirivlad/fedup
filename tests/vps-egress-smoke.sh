@@ -29,6 +29,7 @@ TMP="$(mktemp -d)"
 SN="fvs$BASHPID"; CN="fvc$BASHPID"; EN="fve$BASHPID"
 CV="vcc$BASHPID"; SV="vss$BASHPID"; SW="vsw$BASHPID"; EW="vew$BASHPID"
 PIDS=""
+PN=""  # Optional independent Linux browser/probe host.
 LAB_CAPTURE_PID=""
 LAB_CAPTURE_PATH=""
 LAB_CAPTURE_BASENAME="$(date -u +%Y%m%dT%H%M%SZ)-$"
@@ -40,7 +41,7 @@ lab_capture_start() {
     exit 2
   }
   LAB_CAPTURE_PATH="$FEDUP_LAB_CAPTURE_DIR/$LAB_CAPTURE_BASENAME-$AUTH_MODE-$label.pcap"
-  ip netns exec "$SN" tcpdump -Z root -i "$SV" -nn -U -s 0 \
+  ip netns exec "$SN" tcpdump -Z root -i any -nn -U -s 0 \
     -w "$LAB_CAPTURE_PATH" 'tcp port 7443' \
     >"$TMP/tcpdump-$label.log" 2>&1 &
   LAB_CAPTURE_PID=$!
@@ -67,6 +68,7 @@ cleanup() {
   ip netns del "$CN" 2>/dev/null || true
   ip netns del "$SN" 2>/dev/null || true
   ip netns del "$EN" 2>/dev/null || true
+  if [[ -n "$PN" ]]; then ip netns del "$PN" 2>/dev/null || true; fi
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -154,6 +156,25 @@ ip -n "$EN" addr add 9.9.9.9/32 dev lo
 ip -n "$EN" addr add 1.1.1.1/32 dev lo
 ip -n "$SN" route add default via 172.31.55.2 dev "$SW"
 ip -n "$EN" route add 10.77.0.2/32 via 172.31.55.1 dev "$EW"
+
+# A second independent Linux browser/probe host. No shared network namespace
+# with the VPN client, separate veth and no access to TUN or secrets.
+if [[ "${FEDUP_LAB_SECOND_CLIENT:-0}" == 1 ]]; then
+  PN="fvp$BASHPID"
+  PV="vpc$BASHPID"
+  SP="vsp$BASHPID"
+  ip netns add "$PN"
+  ip link add "$PV" type veth peer name "$SP"
+  ip link set "$PV" netns "$PN"
+  ip link set "$SP" netns "$SN"
+  ip -n "$PN" addr add 172.31.45.2/30 dev "$PV"
+  ip -n "$SN" addr add 172.31.45.1/30 dev "$SP"
+  ip -n "$PN" link set lo up
+  ip -n "$PN" link set "$PV" up
+  ip -n "$SN" link set "$SP" up
+  ip -n "$PN" route add 172.31.44.1/32 via 172.31.45.1 dev "$PV"
+  echo "Independent Linux browser namespace $PN attached to VPS"
+fi
 
 # TCP/HTTP and UDP/53 responders in the synthetic Internet namespace.
 ip netns exec "$EN" python3 -m http.server 8080 --bind 9.9.9.9 \
@@ -305,6 +326,11 @@ echo "Anonymous HEAD HTTP/1.1 and HTTP/2 status 200: PASS"
 # An uncredentialed scanner must not distinguish a protected VPN URL from
 # an ordinary missing URL, and public GET / must not mint a device cookie.
 ip netns exec "$CN" python3 tools/active-probe.py --lab
+if [[ -n "$PN" ]]; then
+  ip netns exec "$PN" curl -kfsS --noproxy '*' --http2     "https://172.31.44.1:7443/" | grep -q "Service is online"
+  ip netns exec "$PN" python3 tools/active-probe.py --lab
+  echo "Independent Linux browser/probe host: PASS"
+fi
 if [[ "$AUTH_MODE" == proof || "$AUTH_MODE" == edge ]]; then
   # An active TLS client must NOT be asked for a certificate at handshake.
   # OpenSSL can decrypt its own post-ServerHello handshake for inspection;
@@ -380,6 +406,11 @@ echo "Active anonymous probe denied; authenticated tunnel still routes packets: 
 # Active DPI-style probes must not gain an HTTP response oracle merely
 # because a different client already holds the long-lived TUN stream.
 ip netns exec "$CN" python3 tools/active-probe.py --lab
+if [[ -n "$PN" ]]; then
+  ip netns exec "$PN" curl -kfsS --noproxy '*' --http2     "https://172.31.44.1:7443/" | grep -q "Service is online"
+  ip netns exec "$PN" python3 tools/active-probe.py --lab
+  echo "Independent Linux browser/probe host: PASS"
+fi
 # A second ordinary HTTPS visitor must still see a public page WHILE
 # the first device maintains its long-lived HTTP/2 TUN. With Caddy h2c
 # different client requests can be multiplexed on one backend connection.
