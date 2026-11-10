@@ -2,10 +2,10 @@
 //! The outer TLS handshake intentionally presents no client certificate.
 use super::*;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use foreign_types::ForeignType;
 use openssl::pkey::PKey;
 use openssl::sign::Signer;
 use openssl::ssl::{SslConnector, SslMethod, SslOptions, SslVerifyMode, SslVersion};
-use foreign_types::ForeignType;
 use rand::{rngs::OsRng, RngCore};
 use std::pin::Pin;
 use std::time::{SystemTime, UNIX_EPOCH};
