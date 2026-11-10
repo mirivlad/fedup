@@ -142,6 +142,7 @@ pub(super) async fn connect(
             cert_der,
             private.as_ref(),
             auth_only,
+            true,
         )
         .await;
     }
@@ -164,6 +165,7 @@ pub(super) async fn connect(
         cert_der,
         private.as_ref(),
         auth_only,
+        false,
     )
     .await
 }
@@ -175,11 +177,25 @@ async fn run_h2<S>(
     cert_der: &[u8],
     private_der: &[u8],
     auth_only: bool,
+    tuned_h2: bool,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let (mut sender, connection) = timeout(IO_TIMEOUT, h2_client::handshake(tls)).await??;
+    let (mut sender, connection) = if tuned_h2 {
+        // A conventional streaming HTTP/2 client should explicitly disable
+        // obsolete server push and negotiate a generous flow-control window.
+        // These are standard h2 SETTINGS, not custom obfuscation frames.
+        let mut builder = h2_client::Builder::new();
+        builder
+            .enable_push(false)
+            .initial_window_size(1_000_000)
+            .initial_connection_window_size(1_000_000)
+            .max_header_list_size(16 * 1024);
+        timeout(IO_TIMEOUT, builder.handshake(tls)).await??
+    } else {
+        timeout(IO_TIMEOUT, h2_client::handshake(tls)).await??
+    };
     let driver = tokio::spawn(connection);
     let nonce = get_challenge(&mut sender, hostname, cert_der, private_der).await?;
     let (cert, signature) = headers_for_proof(
