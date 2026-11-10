@@ -18,6 +18,9 @@ use std::time::{Duration, Instant};
 type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 const CHALLENGE_BYTES: usize = 32;
 const CHALLENGE_TTL: Duration = Duration::from_secs(30);
+const INIT_TTL: Duration = Duration::from_secs(120);
+const INIT_CLOCK_SKEW_SECS: i64 = 60;
+const MAX_INIT_REPLAYS: usize = 256;
 const MAX_CHALLENGES: usize = 128;
 const MAX_CERT_DER: usize = 8192;
 const MAX_SIGNATURE: usize = 256;
@@ -27,6 +30,7 @@ pub const PROBE_PATH: &str = "/fedup-lab/v1/auth-check";
 pub struct DeviceProof {
     ca: X509,
     challenges: Mutex<HashMap<[u8; CHALLENGE_BYTES], Instant>>,
+    init_replay: Mutex<HashMap<[u8; CHALLENGE_BYTES], Instant>>,
 }
 
 impl DeviceProof {
@@ -39,7 +43,83 @@ impl DeviceProof {
         Ok(Self {
             ca,
             challenges: Mutex::new(HashMap::new()),
+            init_replay: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Authorize requesting a server challenge. A normal GET / must never
+    /// issue a special cookie to anonymous web visitors. This signed first
+    /// step is bound to the method, URL, clock, device and fresh client nonce.
+    /// The initial nonce is consumed only AFTER device signature validation.
+    pub fn verify_init(
+        &self,
+        encoded_nonce: &str,
+        timestamp: &str,
+        encoded_cert: &str,
+        encoded_signature: &str,
+    ) -> Result<String> {
+        if encoded_nonce.len() != 43 || timestamp.len() > 12 {
+            return Err("invalid initiation fields".into());
+        }
+        let ts = timestamp.parse::<i64>()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
+        if (now - ts).abs() > INIT_CLOCK_SKEW_SECS {
+            return Err("expired device initiation".into());
+        }
+        let raw = URL_SAFE_NO_PAD.decode(encoded_nonce)?;
+        let nonce: [u8; CHALLENGE_BYTES] =
+            raw.try_into().map_err(|_| "invalid initiation nonce")?;
+        let (fp, cert, sig) = self.parse_identity(encoded_cert, encoded_signature)?;
+        self.check_signature(&cert, &sig, &init_message(encoded_nonce, timestamp, &fp))?;
+        let mut used = self
+            .init_replay
+            .lock()
+            .map_err(|_| "init replay lock poisoned")?;
+        let instant = Instant::now();
+        used.retain(|_, when| instant.duration_since(*when) < INIT_TTL);
+        if used.contains_key(&nonce) || used.len() >= MAX_INIT_REPLAYS {
+            return Err("replayed or overloaded initiation".into());
+        }
+        used.insert(nonce, instant);
+        Ok(fp)
+    }
+
+    fn parse_identity(&self, encoded_cert: &str, encoded_signature: &str) -> Result<(String, X509, Vec<u8>)> {
+        if encoded_cert.len() > 11000 || encoded_signature.len() > 344 {
+            return Err("oversized device identity".into());
+        }
+        let der = URL_SAFE_NO_PAD.decode(encoded_cert)?;
+        let sig = URL_SAFE_NO_PAD.decode(encoded_signature)?;
+        if der.is_empty() || der.len() > MAX_CERT_DER || sig.is_empty() || sig.len() > MAX_SIGNATURE {
+            return Err("invalid device certificate or signature size".into());
+        }
+        let cert = X509::from_der(&der)?;
+        let mut builder = X509StoreBuilder::new()?;
+        builder.add_cert(self.ca.clone())?;
+        builder.set_purpose(X509PurposeId::SSL_CLIENT)?;
+        let store = builder.build();
+        let chain = Stack::new()?;
+        let mut ctx = X509StoreContext::new()?;
+        if !ctx.init(&store, &cert, &chain, |ctx| ctx.verify_cert())? {
+            return Err("device certificate failed trust verification".into());
+        }
+        let fingerprint = Sha256::digest(&der)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        Ok((fingerprint, cert, sig))
+    }
+
+    fn check_signature(&self, cert: &X509, signature: &[u8], payload: &str) -> Result<()> {
+        let public = cert.public_key()?;
+        let mut verifier = Verifier::new(MessageDigest::sha256(), &public)?;
+        verifier.update(payload.as_bytes())?;
+        if !verifier.verify(signature)? {
+            return Err("device key signature is invalid".into());
+        }
+        Ok(())
     }
 
     pub fn issue(&self) -> Result<String> {
@@ -91,35 +171,15 @@ impl DeviceProof {
         if issued.elapsed() >= CHALLENGE_TTL {
             return Err("expired challenge".into());
         }
-        let der = URL_SAFE_NO_PAD.decode(encoded_cert)?;
-        let sig = URL_SAFE_NO_PAD.decode(encoded_signature)?;
-        if der.is_empty() || der.len() > MAX_CERT_DER || sig.is_empty() || sig.len() > MAX_SIGNATURE
-        {
-            return Err("invalid device certificate or signature size".into());
-        }
-        let cert = X509::from_der(&der)?;
-        let mut builder = X509StoreBuilder::new()?;
-        builder.add_cert(self.ca.clone())?;
-        builder.set_purpose(X509PurposeId::SSL_CLIENT)?;
-        let store = builder.build();
-        let chain = Stack::new()?;
-        let mut ctx = X509StoreContext::new()?;
-        if !ctx.init(&store, &cert, &chain, |ctx| ctx.verify_cert())? {
-            return Err("device certificate failed trust verification".into());
-        }
-        let fingerprint = Sha256::digest(&der)
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>();
+        let (fingerprint, cert, sig) = self.parse_identity(encoded_cert, encoded_signature)?;
         let signed = message(method, path, encoded_challenge, &fingerprint);
-        let public = cert.public_key()?;
-        let mut verifier = Verifier::new(MessageDigest::sha256(), &public)?;
-        verifier.update(signed.as_bytes())?;
-        if !verifier.verify(&sig)? {
-            return Err("device key signature is invalid".into());
-        }
+        self.check_signature(&cert, &sig, &signed)?;
         Ok(fingerprint)
     }
+}
+
+pub fn init_message(nonce: &str, timestamp: &str, fingerprint: &str) -> String {
+    format!("FedUp-App-Init-v1\nGET\n/\n{nonce}\n{timestamp}\n{fingerprint}\n")
 }
 
 pub fn message(method: &str, path: &str, challenge: &str, fingerprint: &str) -> String {
