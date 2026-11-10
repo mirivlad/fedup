@@ -271,6 +271,53 @@ mod tests {
     }
 
     #[test]
+    fn signed_init_mints_challenge_only_once_and_rejects_wrong_signature() {
+        let (ca, cert, key) = ca_and_device();
+        let verifier = DeviceProof::new(&ca).unwrap();
+        let nonce = URL_SAFE_NO_PAD.encode([37u8; 32]);
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .to_string();
+        let fp = Sha256::digest(&cert)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let message = init_message(&nonce, &timestamp, &fp);
+        let mut signer = Signer::new(MessageDigest::sha256(), &key).unwrap();
+        signer.update(message.as_bytes()).unwrap();
+        let signature = URL_SAFE_NO_PAD.encode(signer.sign_to_vec().unwrap());
+        let encoded_cert = URL_SAFE_NO_PAD.encode(cert);
+
+        // Public GET / cannot call issue(): only this verified initiation can.
+        assert_eq!(
+            verifier
+                .verify_init(&nonce, &timestamp, &encoded_cert, &signature)
+                .unwrap(),
+            fp
+        );
+        let issued = verifier.issue().unwrap();
+        assert_eq!(URL_SAFE_NO_PAD.decode(issued).unwrap().len(), 32);
+        assert!(verifier
+            .verify_init(&nonce, &timestamp, &encoded_cert, &signature)
+            .is_err());
+
+        // An invalid first signature must not reserve another nonce.
+        let other = URL_SAFE_NO_PAD.encode([49u8; 32]);
+        assert!(verifier
+            .verify_init(&other, &timestamp, &encoded_cert, &signature)
+            .is_err());
+        let wrong_time = (timestamp.parse::<i64>().unwrap() + 180).to_string();
+        assert!(verifier
+            .verify_init(&other, &wrong_time, &encoded_cert, &signature)
+            .is_err());
+        assert!(verifier
+            .verify_init("not-a-nonce", &timestamp, &encoded_cert, &signature)
+            .is_err());
+    }
+
+    #[test]
     fn proof_for_one_method_cannot_authorize_another() {
         let (ca, cert, key) = ca_and_device();
         let state = DeviceProof::new(&ca).unwrap();
