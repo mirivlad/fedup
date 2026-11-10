@@ -11,6 +11,7 @@ fn send_public_page(
     request: &Request<RecvStream>,
     mut respond: h2::server::SendResponse<Bytes>,
     state: &proof::DeviceProof,
+    authorization: &DeviceAuthorization,
 ) -> Result<()> {
     let (status, content_type, body) = public_page(request.method().as_str(), request.uri().path());
     let mut response = Response::builder()
@@ -18,14 +19,26 @@ fn send_public_page(
         .header(CONTENT_TYPE, content_type)
         .header(CONTENT_LENGTH, body.len().to_string())
         .header(CACHE_CONTROL, "no-store");
-    if status == StatusCode::OK {
-        // On nonce exhaustion continue serving web pages instead of crashing
-        // the authorized packet stream. Proof issuance fails closed.
-        if let Ok(nonce) = state.issue() {
-            response = response.header(
-                SET_COOKIE,
-                format!("visitor_session={nonce}; Path=/; Secure; HttpOnly; SameSite=Strict"),
-            );
+    if status == StatusCode::OK && request.method() == http::Method::GET {
+        // Only the cryptographically authenticated device initiation gets a
+        // challenge cookie. Every anonymous GET / looks like the same plain
+        // public page, with no detectable auth header or special cookie.
+        let h = request.headers();
+        let value = |key: &str| h.get(key).and_then(|v| v.to_str().ok()).unwrap_or("");
+        if let Ok(fp) = state.verify_init(
+            value("x-device-init"),
+            value("x-device-time"),
+            value("x-device-certificate"),
+            value("x-device-proof"),
+        ) {
+            if authorized(authorization, &fp).unwrap_or(false) {
+                if let Ok(nonce) = state.issue() {
+                    response = response.header(
+                        SET_COOKIE,
+                        format!("visitor_session={nonce}; Path=/; Secure; HttpOnly; SameSite=Strict"),
+                    );
+                }
+            }
         }
     }
     let mut outgoing = respond.send_response(response.body(())?, false)?;
@@ -89,13 +102,7 @@ where
                     }
                 });
             let Ok(fp) = validated else {
-                respond.send_response(
-                    Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .header(CACHE_CONTROL, "no-store")
-                        .body(())?,
-                    true,
-                )?;
+                send_public_page(&request, respond, &state, &authorization)?;
                 continue;
             };
             if method == "GET" {
@@ -130,21 +137,19 @@ where
             let (tun_end, bridge_end) = duplex(64 * 1024);
             let bridge = tokio::spawn(h2_bridge(request.into_body(), outgoing, bridge_end));
             let browser_sessions = state.clone();
+            let web_authorization = authorization.clone();
             let driver = tokio::spawn(async move {
                 while let Some(next) = connection.accept().await {
                     let (request, mut respond) = next?;
-                    if matches!(request.method(), &http::Method::GET | &http::Method::HEAD)
-                        && matches!(request.uri().path(), "/" | "/index.html")
-                    {
-                        send_public_page(&request, respond, &browser_sessions)?;
-                    } else {
-                        // A second authenticated TUN must not share the
-                        // single-device packet stream. Respond uniformly 404.
-                        respond.send_response(
-                            Response::builder().status(StatusCode::NOT_FOUND).body(())?,
-                            true,
-                        )?;
-                    }
+                    // Keep public web and invalid protected URLs on exactly
+                    // the same fallback route, even while TUN is active.
+                    // The second packet stream remains denied (404).
+                    send_public_page(
+                        &request,
+                        respond,
+                        &browser_sessions,
+                        &web_authorization,
+                    )?;
                 }
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
             });
@@ -154,7 +159,7 @@ where
             return result;
         }
 
-        send_public_page(&request, respond, &state)?;
+        send_public_page(&request, respond, &state, &authorization)?;
     }
     connection.graceful_shutdown();
     let _ = timeout(Duration::from_secs(2), connection.accept()).await;
