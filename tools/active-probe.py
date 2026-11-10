@@ -63,13 +63,16 @@ def main():
     head = request("HEAD", "/")
     if head[0] != 200 or head[1].get("set-cookie"):
         raise AssertionError("anonymous public HEAD leaked a device-session challenge")
-    attempted = request("GET", "/", (
+    asset = request("GET", "/assets/site.js")
+    if asset[0] != 200 or asset[1].get("set-cookie"):
+        raise AssertionError("anonymous JS asset leaked a device-session challenge")
+    attempted = request("GET", "/assets/site.js", (
         "x-device-init: " + "A" * 43,
         "x-device-time: " + str(int(time.time())),
         "x-device-certificate: AA",
         "x-device-proof: AA",
     ))
-    if public_signature(attempted) != public_signature(original):
+    if public_signature(attempted) != public_signature(asset):
         raise AssertionError("forged device initiation changed anonymous web response")
 
     cases = [
@@ -89,7 +92,7 @@ def main():
             )
     print(
         "Offline active-probe parity: PASS (4 protected/unknown HTTP/2 "
-        "pairs, anonymous GET+HEAD and forged initiation have no device cookie)"
+        "pairs, site GET+HEAD, JS asset and forged initiation have no device cookie)"
     )
 
 

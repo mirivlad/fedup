@@ -145,6 +145,10 @@ if [[ "$AUTH_MODE" == edge ]]; then
     futserver "$TMP/ca.pem" "$TMP/users" --behind-trusted-https-proxy \
     >"$TMP/server.log" 2>&1 &
   PIDS="$PIDS $!"
+  # The public homepage is now a genuine independent Caddy file server,
+  # NOT the FedUp backend's common default HTML placeholder.
+  mkdir -p "$TMP/web"
+  printf '%s\n' '<!doctype html><html lang="en"><head><title>Independent Caddy site</title></head><body><h1>Service is online.</h1><p>Caddy-owned public site.</p></body></html>' >"$TMP/web/index.html"
   cat >"$TMP/Caddyfile" <<EOF
 {
     auto_https off
@@ -156,8 +160,15 @@ if [[ "$AUTH_MODE" == edge ]]; then
 https://:7443 {
     bind 172.31.44.1
     tls $TMP/server.pem $TMP/server.key
-    reverse_proxy h2c://127.0.0.1:47678 {
-        flush_interval -1
+    @public_site path / /index.html
+    handle @public_site {
+        root * $TMP/web
+        file_server
+    }
+    handle {
+        reverse_proxy h2c://127.0.0.1:47678 {
+            flush_interval -1
+        }
     }
 }
 EOF
@@ -221,6 +232,15 @@ fi
 if timeout 5 ip netns exec "$CN" curl -kfsS --noproxy '*' --http1.1 \
     "https://172.31.44.1:7443/fedup-lab/v1/ip-tunnel" >/dev/null 2>&1; then
   echo "FAIL: anonymous access exposed a protected HTTP endpoint" >&2; exit 1
+fi
+# Independently hosted public Caddy site must NOT return the backend
+# placeholder; this isolates the real website from protected VPN handlers.
+if [[ "$AUTH_MODE" == edge ]]; then
+  timeout 6 ip netns exec "$CN" curl -kfsS --noproxy '*' --http2 \
+    "https://172.31.44.1:7443/" | grep -q 'Caddy-owned public site' || {
+      echo "FAIL: Caddy's independent public origin was not served" >&2
+      exit 1
+    }
 fi
 # Two distinct GETs over ONE HTTP/2 connection must both succeed.
 # nghttp is invoked once with two distinct same-origin URLs; its verbose
