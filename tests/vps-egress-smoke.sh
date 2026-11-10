@@ -21,6 +21,19 @@ case "$AUTH_MODE" in
   edge) SERVER_CMD=server-vps-proof-h2c; CLIENT_CMD=client-vps-proof-v4; PROBE_CMD=probe-vps-proof ;;
   *) echo "unknown FEDUP_VPS_AUTH_MODE: $AUTH_MODE" >&2; exit 2 ;;
 esac
+TLS_FLAVOR="${FEDUP_VPS_CLIENT_TLS:-rustls}"
+case "$TLS_FLAVOR" in
+  rustls) ;;
+  openssl)
+    [[ "$AUTH_MODE" != mtls ]] || {
+      echo "OpenSSL TLS experiment supports app-proof only; mTLS remains Rustls" >&2
+      exit 2
+    }
+    CLIENT_CMD=client-vps-proof-ossl-v4
+    PROBE_CMD=probe-vps-proof-ossl
+    ;;
+  *) echo "Invalid TLS flavor: $TLS_FLAVOR" >&2; exit 2 ;;
+esac
 USERS="$ROOT/target/debug/fedup-users"
 AUTH="$ROOT/target/debug/fedup-auth"
 DEVICE="$ROOT/target/debug/fedup-device"
@@ -40,7 +53,7 @@ lab_capture_start() {
     echo "Capture directory missing: $FEDUP_LAB_CAPTURE_DIR" >&2
     exit 2
   }
-  LAB_CAPTURE_PATH="$FEDUP_LAB_CAPTURE_DIR/$LAB_CAPTURE_BASENAME-$AUTH_MODE-$label.pcap"
+  LAB_CAPTURE_PATH="$FEDUP_LAB_CAPTURE_DIR/$LAB_CAPTURE_BASENAME-$AUTH_MODE-$TLS_FLAVOR-$label.pcap"
   ip netns exec "$SN" tcpdump -Z root -i any -nn -U -s 0 \
     -w "$LAB_CAPTURE_PATH" 'tcp port 7443' \
     >"$TMP/tcpdump-$label.log" 2>&1 &
@@ -51,7 +64,7 @@ lab_capture_start() {
     echo "Cannot start lab packet capture" >&2
     exit 1
   fi
-  echo "LAB_CAPTURE_START $AUTH_MODE/$label $LAB_CAPTURE_PATH"
+  echo "LAB_CAPTURE_START $AUTH_MODE/$TLS_FLAVOR/$label $LAB_CAPTURE_PATH"
 }
 lab_capture_stop() {
   [[ -n "$LAB_CAPTURE_PID" ]] || return 0
@@ -67,7 +80,7 @@ cleanup() {
   set +e
   lab_capture_stop
   if [[ -n "${FEDUP_LAB_LOG_DIR:-}" && -d "$FEDUP_LAB_LOG_DIR" ]]; then
-    local dest="$FEDUP_LAB_LOG_DIR/$LAB_CAPTURE_BASENAME-$AUTH_MODE"
+    local dest="$FEDUP_LAB_LOG_DIR/$LAB_CAPTURE_BASENAME-$AUTH_MODE-$TLS_FLAVOR"
     mkdir -p "$dest"
     for name in server caddy http udp auth client second-client tls-handshake; do
       if [[ -f "$TMP/$name.log" ]]; then cp "$TMP/$name.log" "$dest/$name.log"; fi
@@ -322,6 +335,23 @@ for _ in $(seq 1 30); do
   sleep 0.1
 done
 [[ -f "$TMP/idle-ready" ]] || { cat "$TMP/idle.log" >&2; exit 1; }
+# Matched-SNI/ALPN/TLS1.3 HTTPS control. Unlike the older numeric-IP
+# browser probes, this uses exactly localhost as the device client does,
+# validates the lab CA and offers the same HTTP/2 + HTTP/1.1 ALPN pair.
+# The TLS/ClientHello comparison uses these independent sessions, NOT
+# the mixed count of anonymous active probes. Workloads remain different.
+if [[ -n "${FEDUP_LAB_CAPTURE_DIR:-}" ]]; then
+  for sample in $(seq 1 8); do
+    timeout 7 ip netns exec "$CN" curl --noproxy '*' -fsS \
+      --http2 --tlsv1.3 --tls-max 1.3 --cacert "$TMP/ca.pem" \
+      --resolve localhost:7443:172.31.44.1 \
+      "https://localhost:7443/" >/dev/null || {
+        echo "FAIL: verified SNI-matched HTTPS control session $sample" >&2
+        exit 1
+      }
+  done
+  echo "Eight verified TLS1.3/h2 curl reference sessions with SNI localhost: PASS"
+fi
 # Anonymous browser must receive real HTML without a client certificate,
 # over both standards-compliant HTTP/1.1 and HTTP/2. Device access remains
 # independent and is tested below. Everything stays inside Linux namespaces.

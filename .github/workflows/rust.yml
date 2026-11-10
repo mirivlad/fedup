@@ -154,6 +154,8 @@ jobs:
         run: sudo env FEDUP_VPS_AUTH_MODE=proof bash tests/vps-egress-smoke.sh
       - name: Verify Caddy HTTPS front to loopback-only h2c proof with real IPv4 NAT and DNS
         run: sudo env FEDUP_VPS_AUTH_MODE=edge bash tests/vps-egress-smoke.sh
+      - name: Verify alternate OpenSSL TLS1.3 client through Caddy and signed-device IPv4 NAT
+        run: sudo env FEDUP_VPS_AUTH_MODE=edge FEDUP_VPS_CLIENT_TLS=openssl bash tests/vps-egress-smoke.sh
 
   tun-namespace:
     runs-on: ubuntu-latest
