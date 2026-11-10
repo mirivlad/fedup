@@ -5,10 +5,10 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use openssl::pkey::PKey;
 use openssl::sign::Signer;
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode, SslVersion};
-use std::pin::Pin;
-use tokio_openssl::SslStream;
 use rand::{rngs::OsRng, RngCore};
+use std::pin::Pin;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio_openssl::SslStream;
 
 fn headers_for_proof(
     cert_der: &[u8],
@@ -119,7 +119,15 @@ pub(super) async fn connect(
         if tls.ssl().selected_alpn_protocol() != Some(b"h2".as_slice()) {
             return Err("OpenSSL client did not negotiate real HTTP/2".into());
         }
-        return run_h2(tls, tun_name, &hostname, cert_der, private.as_ref(), auth_only).await;
+        return run_h2(
+            tls,
+            tun_name,
+            &hostname,
+            cert_der,
+            private.as_ref(),
+            auth_only,
+        )
+        .await;
     }
 
     let mut config = ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
@@ -133,7 +141,15 @@ pub(super) async fn connect(
     if tls.get_ref().1.alpn_protocol() != Some(b"h2".as_slice()) {
         return Err("app-proof gateway did not negotiate real HTTP/2".into());
     }
-    run_h2(tls, tun_name, &hostname, cert_der, private.as_ref(), auth_only).await
+    run_h2(
+        tls,
+        tun_name,
+        &hostname,
+        cert_der,
+        private.as_ref(),
+        auth_only,
+    )
+    .await
 }
 
 async fn run_h2<S>(

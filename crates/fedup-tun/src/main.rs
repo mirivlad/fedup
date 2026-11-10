@@ -1003,9 +1003,7 @@ async fn main() {
                 )
                 .await
             }
-            [_, cmd, addr, device]
-                if cmd == "probe-vps-proof" || cmd == "probe-vps-proof-ossl" =>
-            {
+            [_, cmd, addr, device] if cmd == "probe-vps-proof" || cmd == "probe-vps-proof-ossl" => {
                 app_client::connect(
                     addr.parse()?,
                     "",
