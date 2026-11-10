@@ -249,6 +249,47 @@ if [[ "$AUTH_MODE" == edge ]]; then
     futserver "$TMP/ca.pem" "$TMP/users" --behind-trusted-https-proxy \
     >"$TMP/server.log" 2>&1 &
   PIDS="$PIDS $!"
+  LONG_STREAM_HANDLE=""
+  if [[ "${FEDUP_LAB_LONG_STREAM:-0}" == 1 ]]; then
+    # Independent, ordinary HTTPS streaming control with a real 5-second
+    # chunked HTTP/1.1 origin proxied by Caddy into external HTTP/2.
+    # No VPN secrets, header authentication, or client TLS certificate.
+    ip netns exec "$SN" python3 -u -c '
+import socket,time
+server=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+server.bind(("127.0.0.1",48749))
+server.listen(8)
+while True:
+    conn,_=server.accept()
+    try:
+        conn.settimeout(8)
+        request=conn.recv(8192)
+        if not request.startswith(b"GET /public-stream "):
+            conn.sendall(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+        else:
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
+            for i in range(12):
+                chunk=b"a"*(64+(i%4)*24)
+                conn.sendall(format(len(chunk),"x").encode()+b"\r\n"+chunk+b"\r\n")
+                time.sleep(0.42)
+            conn.sendall(b"0\r\n\r\n")
+    except (BrokenPipeError,OSError):
+        pass
+    finally:
+        conn.close()
+' >"$TMP/stream.log" 2>&1 &
+    PIDS="$PIDS $!"
+    LONG_STREAM_HANDLE="$(cat <<'END_CADDY'
+    @long_stream path /public-stream
+    handle @long_stream {
+        reverse_proxy 127.0.0.1:48749 {
+            flush_interval -1
+        }
+    }
+END_CADDY
+)"
+  fi
   # The public homepage is now a genuine independent Caddy file server,
   # NOT the FedUp backend's common default HTML placeholder.
   mkdir -p "$TMP/web"
@@ -264,6 +305,7 @@ if [[ "$AUTH_MODE" == edge ]]; then
 https://:7443 {
     bind 172.31.44.1
     tls $TMP/server.pem $TMP/server.key
+    $LONG_STREAM_HANDLE
     @public_site path / /index.html
     handle @public_site {
         root * $TMP/web
@@ -438,6 +480,21 @@ echo "HTTP/2 reuse: 2 page requests over 1 TLS connection: PASS"
 echo "Anonymous HTTP/1.1 and HTTP/2 web fallback; protected URL denied: PASS"
 echo "Unauthenticated idle TLS socket deliberately held open"
 lab_capture_stop
+if [[ "$AUTH_MODE" == edge && "${FEDUP_LAB_LONG_STREAM:-0}" == 1 ]]; then
+  lab_capture_start https-stream-control
+  stream_status="$(timeout 12 ip netns exec "$CN" curl -fsS --noproxy '*' \
+    --http2 --no-buffer --tlsv1.3 --tls-max 1.3 --cacert "$TMP/ca.pem" \
+    --resolve localhost:7443:172.31.44.1 \
+    --output /dev/null --write-out '%{http_code}' \
+    "https://localhost:7443/public-stream")"
+  if [[ "$stream_status" != 200 ]]; then
+    cat "$TMP/stream.log" "$TMP/caddy.log" >&2
+    echo "FAIL: five-second ordinary HTTPS2 streaming control" >&2
+    exit 1
+  fi
+  echo "Five-second ordinary HTTPS2 streaming control via Caddy: PASS"
+  lab_capture_stop
+fi
 lab_capture_start vpn-active
 printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" \
   "$CLIENT_CMD" 172.31.44.1:7443 futclient "$TMP/device" \
