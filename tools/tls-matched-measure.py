@@ -37,11 +37,32 @@ def hellos(path):
     return [item for _, item in sorted(parsed, key=lambda row: row[0])]
 
 
-KEYS = ("handshake_bytes", "record_bytes", "cipher_suite_count", "extension_ids", "offered_alpn", "sni")
+KEYS = (
+    "handshake_bytes",
+    "record_bytes",
+    "legacy_version",
+    "session_id_length",
+    "cipher_suite_count",
+    "cipher_suite_ids",
+    "compression_methods",
+    "extension_ids",
+    "extension_lengths",
+    "supported_groups",
+    "ec_point_formats",
+    "signature_algorithm_ids",
+    "supported_versions",
+    "key_share_entries",
+    "psk_key_exchange_modes",
+    "offered_alpn",
+    "sni",
+)
 
 
 def signature(hello):
-    return tuple(tuple(hello[k]) if isinstance(hello[k], list) else hello[k] for k in KEYS)
+    # JSON is stable and hashable even for nested extension/key-share lists.
+    return json.dumps(
+        {key: hello[key] for key in KEYS}, sort_keys=True, separators=(",", ":")
+    )
 
 
 def analyze(normal, vpn, min_control=8):
@@ -68,6 +89,14 @@ def analyze(normal, vpn, min_control=8):
         "clienthello_absolute_byte_gap": abs(candidate["handshake_bytes"] - baseline["handshake_bytes"]),
         "cipher_suite_count_gap": abs(candidate["cipher_suite_count"] - baseline["cipher_suite_count"]),
         "extensions_exact_order_match": candidate["extension_ids"] == baseline["extension_ids"],
+        "cipher_suites_exact_order_match": candidate["cipher_suite_ids"] == baseline["cipher_suite_ids"],
+        "supported_groups_exact_order_match": candidate["supported_groups"] == baseline["supported_groups"],
+        "signature_algorithms_exact_order_match": (
+            candidate["signature_algorithm_ids"] == baseline["signature_algorithm_ids"]
+        ),
+        "extension_payload_lengths_exact_match": (
+            candidate["extension_lengths"] == baseline["extension_lengths"]
+        ),
         "extensions_jaccard": round(
             len(set(candidate["extension_ids"]) & set(baseline["extension_ids"]))
             / len(set(candidate["extension_ids"]) | set(baseline["extension_ids"])), 4
