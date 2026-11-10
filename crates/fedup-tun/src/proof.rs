@@ -86,13 +86,18 @@ impl DeviceProof {
         Ok(fp)
     }
 
-    fn parse_identity(&self, encoded_cert: &str, encoded_signature: &str) -> Result<(String, X509, Vec<u8>)> {
+    fn parse_identity(
+        &self,
+        encoded_cert: &str,
+        encoded_signature: &str,
+    ) -> Result<(String, X509, Vec<u8>)> {
         if encoded_cert.len() > 11000 || encoded_signature.len() > 344 {
             return Err("oversized device identity".into());
         }
         let der = URL_SAFE_NO_PAD.decode(encoded_cert)?;
         let sig = URL_SAFE_NO_PAD.decode(encoded_signature)?;
-        if der.is_empty() || der.len() > MAX_CERT_DER || sig.is_empty() || sig.len() > MAX_SIGNATURE {
+        if der.is_empty() || der.len() > MAX_CERT_DER || sig.is_empty() || sig.len() > MAX_SIGNATURE
+        {
             return Err("invalid device certificate or signature size".into());
         }
         let cert = X509::from_der(&der)?;

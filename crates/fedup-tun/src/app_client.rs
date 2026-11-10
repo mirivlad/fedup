@@ -35,7 +35,10 @@ async fn get_challenge(
     let mut raw = [0u8; 32];
     OsRng.fill_bytes(&mut raw);
     let init = URL_SAFE_NO_PAD.encode(raw);
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs().to_string();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)?
+        .as_secs()
+        .to_string();
     let fp = fingerprint(cert_der);
     let signed = proof::init_message(&init, &timestamp, &fp);
     let key = PKey::private_key_from_der(private_der)?;
@@ -47,7 +50,10 @@ async fn get_challenge(
         .header("x-device-init", init)
         .header("x-device-time", timestamp)
         .header("x-device-certificate", URL_SAFE_NO_PAD.encode(cert_der))
-        .header("x-device-proof", URL_SAFE_NO_PAD.encode(signer.sign_to_vec()?))
+        .header(
+            "x-device-proof",
+            URL_SAFE_NO_PAD.encode(signer.sign_to_vec()?),
+        )
         .body(())?;
     let (response, _) = sender.send_request(request, true)?;
     let response = timeout(IO_TIMEOUT, response).await??;

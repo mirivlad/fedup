@@ -35,7 +35,9 @@ fn send_public_page(
                 if let Ok(nonce) = state.issue() {
                     response = response.header(
                         SET_COOKIE,
-                        format!("visitor_session={nonce}; Path=/; Secure; HttpOnly; SameSite=Strict"),
+                        format!(
+                            "visitor_session={nonce}; Path=/; Secure; HttpOnly; SameSite=Strict"
+                        ),
                     );
                 }
             }
@@ -144,12 +146,7 @@ where
                     // Keep public web and invalid protected URLs on exactly
                     // the same fallback route, even while TUN is active.
                     // The second packet stream remains denied (404).
-                    send_public_page(
-                        &request,
-                        respond,
-                        &browser_sessions,
-                        &web_authorization,
-                    )?;
+                    send_public_page(&request, respond, &browser_sessions, &web_authorization)?;
                 }
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
             });
