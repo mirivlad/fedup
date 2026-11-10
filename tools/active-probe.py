@@ -40,7 +40,12 @@ def request(method, path, headers=()):
         if ":" in line:
             key, value = line.split(":", 1)
             fields.setdefault(key.strip().lower(), []).append(value.strip())
-    return status, fields, result.stdout
+    # curl --head prints response headers to stdout as well as to the
+    # --dump-header destination. HEAD has NO response body; comparing this
+    # stdout would incorrectly treat a changing standard Date header as a
+    # payload difference across two otherwise identical 404 responses.
+    body = b"" if method == "HEAD" else result.stdout
+    return status, fields, body
 
 
 def public_signature(result):
