@@ -142,7 +142,7 @@ where
             let web_authorization = authorization.clone();
             let driver = tokio::spawn(async move {
                 while let Some(next) = connection.accept().await {
-                    let (request, mut respond) = next?;
+                    let (request, respond) = next?;
                     // Keep public web and invalid protected URLs on exactly
                     // the same fallback route, even while TUN is active.
                     // The second packet stream remains denied (404).
