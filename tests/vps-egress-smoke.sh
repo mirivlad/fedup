@@ -29,8 +29,39 @@ TMP="$(mktemp -d)"
 SN="fvs$BASHPID"; CN="fvc$BASHPID"; EN="fve$BASHPID"
 CV="vcc$BASHPID"; SV="vss$BASHPID"; SW="vsw$BASHPID"; EW="vew$BASHPID"
 PIDS=""
+LAB_CAPTURE_PID=""
+LAB_CAPTURE_PATH=""
+LAB_CAPTURE_BASENAME="$(date -u +%Y%m%dT%H%M%SZ)-$"
+lab_capture_start() {
+  local label="$1"
+  [[ -n "${FEDUP_LAB_CAPTURE_DIR:-}" ]] || return 0
+  [[ -d "$FEDUP_LAB_CAPTURE_DIR" ]] || {
+    echo "Capture directory missing: $FEDUP_LAB_CAPTURE_DIR" >&2
+    exit 2
+  }
+  LAB_CAPTURE_PATH="$FEDUP_LAB_CAPTURE_DIR/$LAB_CAPTURE_BASENAME-$AUTH_MODE-$label.pcap"
+  ip netns exec "$SN" tcpdump -Z root -i "$SV" -nn -U -s 0 \
+    -w "$LAB_CAPTURE_PATH" 'tcp port 7443' \
+    >"$TMP/tcpdump-$label.log" 2>&1 &
+  LAB_CAPTURE_PID=$!
+  sleep 0.3
+  if ! kill -0 "$LAB_CAPTURE_PID" 2>/dev/null; then
+    cat "$TMP/tcpdump-$label.log" >&2
+    echo "Cannot start lab packet capture" >&2
+    exit 1
+  fi
+  echo "LAB_CAPTURE_START $AUTH_MODE/$label $LAB_CAPTURE_PATH"
+}
+lab_capture_stop() {
+  [[ -n "$LAB_CAPTURE_PID" ]] || return 0
+  kill -INT "$LAB_CAPTURE_PID" 2>/dev/null || true
+  wait "$LAB_CAPTURE_PID" 2>/dev/null || true
+  LAB_CAPTURE_PID=""
+  echo "LAB_CAPTURE_SAVED $LAB_CAPTURE_PATH"
+}
 cleanup() {
   set +e
+  lab_capture_stop
   for pid in $PIDS; do kill "$pid" 2>/dev/null || true; done
   for pid in $PIDS; do wait "$pid" 2>/dev/null || true; done
   ip netns del "$CN" 2>/dev/null || true
@@ -196,6 +227,7 @@ FEDUP_EGRESS_STATE="$TMP/egress-state" \
   ip netns exec "$SN" env FEDUP_EGRESS_STATE="$TMP/egress-state" \
   bash scripts/vps-egress-v4.sh install futserver "$SW" \
   --acknowledge-host-network-changes
+lab_capture_start https-baseline
 
 # A non-authenticated client keeps its TCP socket open without sending TLS.
 # An ordinary VPN client MUST still be served, instead of being stuck behind
@@ -292,6 +324,8 @@ fi
 echo "HTTP/2 reuse: 2 page requests over 1 TLS connection: PASS"
 echo "Anonymous HTTP/1.1 and HTTP/2 web fallback; protected URL denied: PASS"
 echo "Unauthenticated idle TLS socket deliberately held open"
+lab_capture_stop
+lab_capture_start vpn-active
 printf '%s\n' "$PASS" | ip netns exec "$CN" "$TUN" \
   "$CLIENT_CMD" 172.31.44.1:7443 futclient "$TMP/device" \
   --passphrase-stdin >"$TMP/client.log" 2>&1 &
@@ -382,3 +416,4 @@ if timeout 5 ip netns exec "$CN" ping -n -c 1 -W 2 9.9.9.9 >/dev/null; then
   exit 1
 fi
 echo "Active account revocation prevents further IPv4 Internet egress: PASS"
+lab_capture_stop
