@@ -24,6 +24,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Verify matched TLS ClientHello parser and normalization
         run: python3 tools/test-tls-matched-measure.py
+      - name: Verify active probe excludes dynamic HEAD header bytes from body
+        run: python3 tools/test-active-probe.py
       - name: Compile parser fuzz target
         run: cargo check --manifest-path fuzz/Cargo.toml --bin frame_parser
       - name: Build one-shot mTLS lab
