@@ -530,7 +530,11 @@ fn public_page(method: &str, path: &str) -> (StatusCode, &'static str, &'static 
     if (method == "GET" || method == "HEAD") && (path == "/" || path == "/index.html") {
         (StatusCode::OK, "text/html; charset=utf-8", PUBLIC_PAGE)
     } else if (method == "GET" || method == "HEAD") && path == proof::INIT_PATH {
-        (StatusCode::OK, "application/javascript; charset=utf-8", PUBLIC_ASSET)
+        (
+            StatusCode::OK,
+            "application/javascript; charset=utf-8",
+            PUBLIC_ASSET,
+        )
     } else {
         (
             StatusCode::NOT_FOUND,

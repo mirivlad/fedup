@@ -185,7 +185,10 @@ impl DeviceProof {
 }
 
 pub fn init_message(nonce: &str, timestamp: &str, fingerprint: &str) -> String {
-    format!("FedUp-App-Init-v1\nGET\n{}\n{nonce}\n{timestamp}\n{fingerprint}\n", INIT_PATH)
+    format!(
+        "FedUp-App-Init-v1\nGET\n{}\n{nonce}\n{timestamp}\n{fingerprint}\n",
+        INIT_PATH
+    )
 }
 
 pub fn message(method: &str, path: &str, challenge: &str, fingerprint: &str) -> String {
