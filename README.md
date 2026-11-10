@@ -2,7 +2,7 @@
 
 **FedUp** is an early-stage, open-source project for a self-hosted, cross-platform private network tunnel for personal and family use.
 
-> Status (10 Nov 2026): **experimental Android-to-VPS IPv4 Internet path implemented, not physically accepted**. A new opt-in Caddy HTTPS/h2c transport uses one-time in-HTTP device-key proof without TLS client CertificateRequest; isolated Linux CI verifies NAT/DNS and account revocation. It is not yet accepted on physical Android or a real public VPS. In isolated CI namespaces, account-bound mTLS over genuine HTTP/2 carries HTTP and UDP DNS through VPS SNAT. Android has one-tap login/enrollment, a default IPv4 route and tunneled DNS. **Not production-safe:** disposable online CA, no complete crash kill switch, no live Android-to-VPS test, no stable signed APK or measured DPI resistance.
+> Status (10 Nov 2026): **experimental Android-to-VPS IPv4 Internet path implemented, not physically accepted**. Isolated Linux CI verifies genuine HTTP/2, IPv4 SNAT, DNS and device revocation. An opt-in Caddy HTTPS edge uses cryptographically signed device initialization and one-time application proof **without a public TLS client CertificateRequest**. Its public homepage may be a separate real Caddy site; protected URLs and ordinary unknown URLs now produce identical anonymous 404 responses. Android still accepts server, username and password. **Not production-safe:** disposable online CA, no complete crash kill switch, no real Android-to-VPS acceptance, no stable signed APK and no measured passive DPI resistance.
 
 ## Simple account login and automatic device enrollment (LAB only)
 
