@@ -521,6 +521,7 @@ async fn h2_auth_probe(
 // and a single shared 443 listener must be designed before production use.
 const PUBLIC_PAGE: &[u8] = b"<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>Home</title></head><body><main><h1>Welcome</h1><p>Service is online.</p></main></body></html>\n";
 const PUBLIC_NOT_FOUND: &[u8] = b"Not Found\n";
+const PUBLIC_ASSET: &[u8] = b"(()=>{document.documentElement.dataset.ready=\"1\"})();\n";
 const PUBLIC_REQUEST_LIMIT: usize = 4096;
 const PUBLIC_MAX_H2_REQUESTS: usize = 16;
 const PUBLIC_H2_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -528,6 +529,8 @@ const PUBLIC_H2_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 fn public_page(method: &str, path: &str) -> (StatusCode, &'static str, &'static [u8]) {
     if (method == "GET" || method == "HEAD") && (path == "/" || path == "/index.html") {
         (StatusCode::OK, "text/html; charset=utf-8", PUBLIC_PAGE)
+    } else if (method == "GET" || method == "HEAD") && path == proof::INIT_PATH {
+        (StatusCode::OK, "application/javascript; charset=utf-8", PUBLIC_ASSET)
     } else {
         (
             StatusCode::NOT_FOUND,

@@ -120,8 +120,8 @@ internal object ApplicationProof {
         val initBytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
         val initNonce = encoder.encodeToString(initBytes)
         val timestamp = (System.currentTimeMillis() / 1000).toString()
-        val initPayload = "FedUp-App-Init-v1\nGET\n/\n$initNonce\n$timestamp\n$fp\n"
-        val page = Request.Builder().url("$baseUrl/")
+        val initPayload = "FedUp-App-Init-v1\nGET\n/assets/site.js\n$initNonce\n$timestamp\n$fp\n"
+        val page = Request.Builder().url("$baseUrl/assets/site.js")
             .header("x-device-init", initNonce)
             .header("x-device-time", timestamp)
             .header("x-device-certificate", encoder.encodeToString(certDer))

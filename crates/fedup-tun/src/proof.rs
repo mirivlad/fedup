@@ -24,6 +24,7 @@ const MAX_INIT_REPLAYS: usize = 256;
 const MAX_CHALLENGES: usize = 128;
 const MAX_CERT_DER: usize = 8192;
 const MAX_SIGNATURE: usize = 256;
+pub const INIT_PATH: &str = "/assets/site.js";
 pub const TUNNEL_PATH: &str = "/fedup-lab/v1/ip-tunnel";
 pub const PROBE_PATH: &str = "/fedup-lab/v1/auth-check";
 
@@ -184,7 +185,7 @@ impl DeviceProof {
 }
 
 pub fn init_message(nonce: &str, timestamp: &str, fingerprint: &str) -> String {
-    format!("FedUp-App-Init-v1\nGET\n/\n{nonce}\n{timestamp}\n{fingerprint}\n")
+    format!("FedUp-App-Init-v1\nGET\n{}\n{nonce}\n{timestamp}\n{fingerprint}\n", INIT_PATH)
 }
 
 pub fn message(method: &str, path: &str, challenge: &str, fingerprint: &str) -> String {

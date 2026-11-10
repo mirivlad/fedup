@@ -46,7 +46,7 @@ async fn get_challenge(
     signer.update(signed.as_bytes())?;
     let request = Request::builder()
         .method(http::Method::GET)
-        .uri(format!("https://{hostname}/"))
+        .uri(format!("https://{hostname}{}", proof::INIT_PATH))
         .header("x-device-init", init)
         .header("x-device-time", timestamp)
         .header("x-device-certificate", URL_SAFE_NO_PAD.encode(cert_der))

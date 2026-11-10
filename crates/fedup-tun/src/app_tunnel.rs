@@ -19,7 +19,10 @@ fn send_public_page(
         .header(CONTENT_TYPE, content_type)
         .header(CONTENT_LENGTH, body.len().to_string())
         .header(CACHE_CONTROL, "no-store");
-    if status == StatusCode::OK && request.method() == http::Method::GET {
+    if status == StatusCode::OK
+        && request.method() == http::Method::GET
+        && request.uri().path() == proof::INIT_PATH
+    {
         // Only the cryptographically authenticated device initiation gets a
         // challenge cookie. Every anonymous GET / looks like the same plain
         // public page, with no detectable auth header or special cookie.
