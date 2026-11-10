@@ -4,11 +4,18 @@ use super::*;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use openssl::pkey::PKey;
 use openssl::sign::Signer;
-use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode, SslVersion};
+use openssl::ssl::{SslConnector, SslMethod, SslOptions, SslVerifyMode, SslVersion};
+use foreign_types::ForeignType;
 use rand::{rngs::OsRng, RngCore};
 use std::pin::Pin;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_openssl::SslStream;
+
+// OpenSSL 1.1.1+ exposes this standard TLS 1.3 capability in libssl, but the
+// rust-openssl high-level crate does not currently wrap it. Linux-only client.
+unsafe extern "C" {
+    fn SSL_set_post_handshake_auth(ssl: *mut std::ffi::c_void, val: std::ffi::c_int);
+}
 
 fn headers_for_proof(
     cert_der: &[u8],
@@ -106,6 +113,9 @@ pub(super) async fn connect(
         builder.set_min_proto_version(Some(SslVersion::TLS1_3))?;
         builder.set_max_proto_version(Some(SslVersion::TLS1_3))?;
         builder.set_verify(SslVerifyMode::PEER);
+        // Match regular curl/OpenSSL TLS 1.3 without the legacy SessionTicket
+        // extension. New connector per device means no session resumption.
+        builder.set_options(SslOptions::NO_TICKET);
         builder.set_ca_file(&device.ca_path)?;
         builder.set_alpn_protos(b"\x02h2\x08http/1.1")?;
         let ssl = builder
@@ -113,6 +123,12 @@ pub(super) async fn connect(
             .configure()?
             .verify_hostname(true)
             .into_ssl(&hostname)?;
+        // Curl/OpenSSL advertises standard TLS 1.3 post-handshake auth.
+        // This enables the extension only: no client certificate is loaded
+        // and the public Caddy endpoint never requests TLS client auth.
+        // Our actual device identity remains bound to signed HTTP/2 proof.
+        // SAFETY: ssl.as_ptr() is valid while ssl owns the OpenSSL SSL object.
+        unsafe { SSL_set_post_handshake_auth(ssl.as_ptr().cast(), 1) };
         let socket = timeout(IO_TIMEOUT, TcpStream::connect(server)).await??;
         let mut tls = SslStream::new(ssl, socket)?;
         timeout(IO_TIMEOUT, Pin::new(&mut tls).connect()).await??;
