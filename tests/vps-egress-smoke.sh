@@ -189,8 +189,35 @@ if [[ "${FEDUP_LAB_SECOND_CLIENT:-0}" == 1 ]]; then
 fi
 
 # TCP/HTTP and UDP/53 responders in the synthetic Internet namespace.
-ip netns exec "$EN" python3 -m http.server 8080 --bind 9.9.9.9 \
-  >"$TMP/http.log" 2>&1 &
+# Deterministic test HTTP responder. Python's http.server performs startup
+# name-resolution in some distributions; the synthetic network intentionally
+# has no normal resolver and this can stall before the socket is bound.
+ip netns exec "$EN" python3 -u -c '
+import socket
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("9.9.9.9", 8080))
+server.listen(16)
+print("Synthetic HTTP listener ready", flush=True)
+while True:
+    conn, _peer = server.accept()
+    try:
+        conn.settimeout(3)
+        request = conn.recv(8192)
+        body = b"FedUp synthetic Internet HTTP control\n"
+        if request.startswith((b"GET ", b"HEAD ")):
+            header = (b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
+                      + b"Content-Length: " + str(len(body)).encode()
+                      + b"\r\nConnection: close\r\n\r\n")
+            conn.sendall(header + (b"" if request.startswith(b"HEAD ") else body))
+        else:
+            conn.sendall(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n"
+                         b"Connection: close\r\n\r\n")
+    except OSError:
+        pass
+    finally:
+        conn.close()
+' >"$TMP/http.log" 2>&1 &
 PIDS="$PIDS $!"
 ip netns exec "$EN" python3 -u -c '
 import socket
