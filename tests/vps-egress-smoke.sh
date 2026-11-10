@@ -32,7 +32,7 @@ PIDS=""
 PN=""  # Optional independent Linux browser/probe host.
 LAB_CAPTURE_PID=""
 LAB_CAPTURE_PATH=""
-LAB_CAPTURE_BASENAME="$(date -u +%Y%m%dT%H%M%SZ)-$"
+LAB_CAPTURE_BASENAME="$(date -u +%Y%m%dT%H%M%SZ)-$BASHPID"
 lab_capture_start() {
   local label="$1"
   [[ -n "${FEDUP_LAB_CAPTURE_DIR:-}" ]] || return 0
@@ -57,12 +57,24 @@ lab_capture_stop() {
   [[ -n "$LAB_CAPTURE_PID" ]] || return 0
   kill -INT "$LAB_CAPTURE_PID" 2>/dev/null || true
   wait "$LAB_CAPTURE_PID" 2>/dev/null || true
+  if [[ -n "${FEDUP_LAB_CAPTURE_DIR:-}" ]]; then
+    chown --reference="$FEDUP_LAB_CAPTURE_DIR" "$LAB_CAPTURE_PATH" 2>/dev/null || true
+  fi
   LAB_CAPTURE_PID=""
   echo "LAB_CAPTURE_SAVED $LAB_CAPTURE_PATH"
 }
 cleanup() {
   set +e
   lab_capture_stop
+  if [[ -n "${FEDUP_LAB_LOG_DIR:-}" && -d "$FEDUP_LAB_LOG_DIR" ]]; then
+    local dest="$FEDUP_LAB_LOG_DIR/$LAB_CAPTURE_BASENAME-$AUTH_MODE"
+    mkdir -p "$dest"
+    for name in server caddy http udp auth client second-client tls-handshake; do
+      if [[ -f "$TMP/$name.log" ]]; then cp "$TMP/$name.log" "$dest/$name.log"; fi
+    done
+    chown -R --reference="$FEDUP_LAB_LOG_DIR" "$dest" 2>/dev/null || true
+    echo "LAB_LOGS_SAVED $dest"
+  fi
   for pid in $PIDS; do kill "$pid" 2>/dev/null || true; done
   for pid in $PIDS; do wait "$pid" 2>/dev/null || true; done
   ip netns del "$CN" 2>/dev/null || true
@@ -249,6 +261,24 @@ FEDUP_EGRESS_STATE="$TMP/egress-state" \
   bash scripts/vps-egress-v4.sh install futserver "$SW" \
   --acknowledge-host-network-changes
 lab_capture_start https-baseline
+
+# Confirm the synthetic Internet responder is actually listening before
+# blaming the VPN route for a refused TCP connection.
+HTTP_READY=0
+for attempt in $(seq 1 30); do
+  if timeout 3 ip netns exec "$EN" curl -fsS --noproxy '*' --max-time 2 \
+    http://9.9.9.9:8080/ >/dev/null 2>&1; then
+    HTTP_READY=1
+    break
+  fi
+  sleep 0.1
+done
+if [[ "$HTTP_READY" != 1 ]]; then
+  cat "$TMP/http.log" >&2
+  echo "FAIL: synthetic Internet HTTP server not ready" >&2
+  exit 1
+fi
+echo "Synthetic remote HTTP responder on 9.9.9.9:8080: PASS"
 
 # A non-authenticated client keeps its TCP socket open without sending TLS.
 # An ordinary VPN client MUST still be served, instead of being stuck behind
