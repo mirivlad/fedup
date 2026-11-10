@@ -167,13 +167,22 @@ vpn.example.com {
     handle @fedup_api {
         reverse_proxy 127.0.0.1:47677
     }
+    @public_site path / /index.html
+    handle @public_site {
+        root * /srv/www/my-existing-site
+        file_server
+    }
     handle {
+        # Includes GET /assets/site.js for device-key initiation.
+        # Unknown URLs and denied VPN routes share the same 404 handler.
         reverse_proxy h2c://127.0.0.1:47678 {
             flush_interval -1
         }
     }
 }
 ~~~
+
+**Публичная часть:** разместите **собственный настоящий сайт** в `/srv/www/my-existing-site` (с доступом на чтение для Caddy) или адаптируйте `@public_site` к уже работающему сайту. В коде клиента зарезервирован обычный JS-ресурс `/assets/site.js`; не перехватывайте его правилами публичного сайта. Анонимный GET этого ресурса не получает никаких специальных cookie. Backend можно проверять через сравнение четырёх защищённых URL и обычных 404 с `tools/active-probe.py` внутри изолированной сетевой лаборатории. **Не перезаписывайте существующий Caddyfile этим примером.**
 
 **Безопасность и ограничения:** backend h2c не шифрует loopback-трафик
 и должен быть доступен только локальному Caddy, без публикации наружу.
