@@ -250,6 +250,9 @@ for proto in --http1.1 --http2; do
   }
 done
 echo "Anonymous HEAD HTTP/1.1 and HTTP/2 status 200: PASS"
+# An uncredentialed scanner must not distinguish a protected VPN URL from
+# an ordinary missing URL, and public GET / must not mint a device cookie.
+ip netns exec "$CN" python3 tools/active-probe.py --lab
 if [[ "$AUTH_MODE" == proof || "$AUTH_MODE" == edge ]]; then
   # An active TLS client must NOT be asked for a certificate at handshake.
   # OpenSSL can decrypt its own post-ServerHello handshake for inspection;
