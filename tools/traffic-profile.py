@@ -152,6 +152,8 @@ def parse_client_hello(data):
     pos = 34
     session_len = body[pos]
     pos += 1 + session_len
+    if pos + 2 > len(body):
+        return None
     cipher_len = u16(body, pos)
     pos += 2
     if cipher_len % 2 or pos + cipher_len > len(body):
@@ -161,10 +163,21 @@ def parse_client_hello(data):
     if pos >= len(body):
         return None
     compression_len = body[pos]
-    pos += 1 + compression_len
+    pos += 1
+    if pos + compression_len > len(body):
+        return None
+    compression_methods = list(body[pos : pos + compression_len])
+    pos += compression_len
     extensions = []
+    extension_lengths = []
     alpn = []
     sni = None
+    supported_groups = []
+    ec_point_formats = []
+    signature_algorithm_ids = []
+    supported_versions = []
+    key_share_entries = []
+    psk_key_exchange_modes = []
     if pos < len(body):
         length = u16(body, pos)
         pos += 2
@@ -180,6 +193,46 @@ def parse_client_hello(data):
             ext = body[pos : pos + ext_len]
             pos += ext_len
             extensions.append(ext_type)
+            extension_lengths.append([ext_type, ext_len])
+            if ext_type == 10 and len(ext) >= 2:  # supported_groups
+                size = u16(ext, 0)
+                if size + 2 != len(ext) or size % 2:
+                    return None
+                supported_groups = [u16(ext, i) for i in range(2, len(ext), 2)]
+            elif ext_type == 11 and len(ext) >= 1:  # ec_point_formats
+                size = ext[0]
+                if size + 1 != len(ext):
+                    return None
+                ec_point_formats = list(ext[1:])
+            elif ext_type == 13 and len(ext) >= 2:  # signature_algorithms
+                size = u16(ext, 0)
+                if size + 2 != len(ext) or size % 2:
+                    return None
+                signature_algorithm_ids = [u16(ext, i) for i in range(2, len(ext), 2)]
+            elif ext_type == 43 and len(ext) >= 1:  # supported_versions
+                size = ext[0]
+                if size + 1 != len(ext) or size % 2:
+                    return None
+                supported_versions = [u16(ext, i) for i in range(1, len(ext), 2)]
+            elif ext_type == 45 and len(ext) >= 1:  # psk_key_exchange_modes
+                size = ext[0]
+                if size + 1 != len(ext):
+                    return None
+                psk_key_exchange_modes = list(ext[1:])
+            elif ext_type == 51 and len(ext) >= 2:  # key_share
+                size = u16(ext, 0)
+                if size + 2 != len(ext):
+                    return None
+                cursor = 2
+                while cursor < len(ext):
+                    if cursor + 4 > len(ext):
+                        return None
+                    group, key_size = u16(ext, cursor), u16(ext, cursor + 2)
+                    cursor += 4
+                    if cursor + key_size > len(ext):
+                        return None
+                    key_share_entries.append([group, key_size])
+                    cursor += key_size
             if ext_type == 0 and len(ext) >= 5:  # server_name
                 nlen = u16(ext, 0)
                 if nlen + 2 <= len(ext) and ext[2] == 0:
@@ -197,13 +250,26 @@ def parse_client_hello(data):
                         return None
                     alpn.append(ext[i : i + slen].decode("ascii", "replace"))
                     i += slen
+        if pos != stop:
+            return None
     return {
         "sni": sni,
         "offered_alpn": alpn,
         "handshake_bytes": handshake_len + 4,
         "record_bytes": record_len,
         "cipher_suite_count": len(ciphers),
+        "cipher_suite_ids": ciphers,
+        "legacy_version": u16(body, 0),
+        "session_id_length": session_len,
+        "compression_methods": compression_methods,
         "extension_ids": extensions,
+        "extension_lengths": extension_lengths,
+        "supported_groups": supported_groups,
+        "ec_point_formats": ec_point_formats,
+        "signature_algorithm_ids": signature_algorithm_ids,
+        "supported_versions": supported_versions,
+        "key_share_entries": key_share_entries,
+        "psk_key_exchange_modes": psk_key_exchange_modes,
     }
 
 
